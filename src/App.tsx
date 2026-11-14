@@ -7,11 +7,31 @@ import { ReportsView } from './components/ReportsView'
 import { SettingsView } from './components/SettingsView'
 import { TransactionsTable } from './components/TransactionsTable'
 import {
+  ExpenseModal,
+  type ExpenseForm,
+  type FirstMonthMode,
+} from './components/modals/ExpenseModal'
+import {
   InvestmentModals,
   type InvestmentEditor,
   type InvestmentMoveEditor,
   type ReserveGoalEditor,
 } from './components/modals/InvestmentModals'
+import {
+  ReimbursementModals,
+  type AdvanceInstallmentsEditor,
+  type ManualReimbursementEditor,
+} from './components/modals/ReimbursementModals'
+import {
+  SettingsAndRecurrenceModals,
+  type RecurrenceEditor,
+  type SettingEditor,
+} from './components/modals/SettingsAndRecurrenceModals'
+import {
+  AppUtilityModals,
+  type ConfirmDialog,
+  type OnboardingStartMode,
+} from './components/modals/AppUtilityModals'
 import {
   buildInstallmentRelief,
   buildOccurrences as calculateOccurrences,
@@ -37,15 +57,12 @@ import {
   splitAmountEquallyWithMe,
   type BackupPayload,
   type Card,
-  type CardKind,
   type Category,
-  type ClosingDayRule,
   type Data,
   type Expense,
   type Investment,
   type InvestmentEntryType,
   type ManualReimbursement,
-  type Method,
   type Occurrence,
   type Participant,
   type ParticipantShare,
@@ -53,68 +70,16 @@ import {
   type ReserveGoal,
 } from './finance'
 import {
-  blurActiveInputOnTouch,
-  categorySymbol,
   createId,
-  dismissKeyboardOnEnter,
-  hexToHsl,
-  hslToHex,
   isTouchDevice,
   money,
   monthName,
   profileInitials,
-  shortMonthYear,
   type MainView,
   type SortOrder,
 } from './utils/format'
 import { exportReportImage, exportStyledSpreadsheet } from './utils/exportReport'
 
-type FirstMonthMode = 'auto' | 'current' | 'next' | 'plus2'
-
-type ExpenseForm = {
-  description: string
-  amount: string
-  date: string
-  category: string
-  method: Method
-  cardId: string
-  installments: string
-  afterClosing: boolean
-  firstMonthMode: FirstMonthMode
-  shares: { participantId: string; amount: string; installment: string }[]
-}
-type SettingEditor = {
-  kind: 'category' | 'card' | 'participant'
-  id?: string
-  name: string
-  color: string
-  cardKind: CardKind
-  closingDay: string
-  dueDay: string
-  closingDayRule: ClosingDayRule
-}
-type RecurrenceEditor = {
-  id?: string
-  description: string
-  amount: string
-  category: string
-  method: Method
-  cardId: string
-  day: string
-}
-type ManualReimbursementEditor = {
-  id?: string
-  description: string
-  amount: string
-  participantId: string
-  cardId: string
-  categoryId: string
-}
-type AdvanceInstallmentsEditor = {
-  occurrence: Occurrence
-  countToAdvance: number
-  customAmount: string
-}
 type ModalKind =
   | 'expense'
   | 'recurrence'
@@ -131,27 +96,11 @@ type ModalKind =
   | 'reset'
   | 'confirm'
   | 'pwa-guide'
-type OnboardingStartMode = 'empty' | 'demo' | 'keep'
-type ConfirmDialog = { eyebrow: string; title: string; description: string; confirmLabel: string; onConfirm: () => void }
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
 
 const MODAL_CLOSE_DURATION_MS = 220
 const TOAST_AUTO_DISMISS_MS = 3800
 const SWIPE_VIEWS: MainView[] = ['Visão geral', 'Lançamentos', 'Relatórios', 'Investimentos', 'Recorrências', 'Ajustes']
-const CATEGORY_COLOR_PRESETS = [
-  { color: '#6e7f72', label: 'Verde sálvia' },
-  { color: '#b88b63', label: 'Terracota suave' },
-  { color: '#74858b', label: 'Azul ardósia' },
-  { color: '#9b8193', label: 'Malva' },
-  { color: '#8b966d', label: 'Oliva' },
-  { color: '#c46b5c', label: 'Coral' },
-  { color: '#5b8a72', label: 'Esmeralda' },
-  { color: '#6a7ba2', label: 'Índigo' },
-  { color: '#c89b54', label: 'Âmbar' },
-  { color: '#866f9b', label: 'Lavanda' },
-  { color: '#5d8b96', label: 'Petróleo' },
-  { color: '#a36877', label: 'Rosé' },
-]
 
 // Dicionário de senhas secretas do Konami Code (chave em minúsculas -> escrita exibida no modal)
 const EASTER_EGG_SECRETS: Record<string, string> = {
@@ -2881,1946 +2830,148 @@ function App() {
         </div>
       </main>
 
-      {modal && (
-        <div
-          className={`modal-backdrop ${closingModal === 'expense' ? 'is-closing' : ''}`}
-          onMouseDown={e => {
-            if (e.target === e.currentTarget) closeExpenseModal()
-          }}
-        >
-          <form
-            noValidate
-            className={`modal expense-modal ${formShake === 'expense' ? 'is-shaking' : ''}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="expense-modal-title"
-            onSubmit={addExpense}
-            onAnimationEnd={event => {
-              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
-            }}
-          >
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">{editingExpenseId ? 'EDITAR REGISTRO' : 'NOVO REGISTRO'}</span>
-                <h2 id="expense-modal-title">{editingExpenseId ? 'Editar lançamento' : 'Adicionar lançamento'}</h2>
-              </div>
-              <button type="button" aria-label="Fechar lançamento" onClick={closeExpenseModal}>
-                ×
-              </button>
-            </div>
-            <label className={expenseErrors.description ? 'is-invalid' : ''}>
-              Descrição
-              <input
-                ref={expenseDescInputRef}
-                autoFocus={!isTouchDevice()}
-                enterKeyHint="done"
-                onKeyDown={dismissKeyboardOnEnter}
-                aria-invalid={Boolean(expenseErrors.description)}
-                placeholder="Ex.: mercado, conta de luz..."
-                value={form.description}
-                onChange={e => {
-                  clearFieldError(setExpenseErrors, 'description')
-                  setForm({ ...form, description: e.target.value })
-                }}
-              />
-              {expenseErrors.description && (
-                <small className="field-error-msg" role="alert">
-                  {expenseErrors.description}
-                </small>
-              )}
-            </label>
-            <div className="form-row">
-              <label className={expenseErrors.amount ? 'is-invalid' : ''}>
-                Valor total
-                <div className="money-input-wrap">
-                  <span className="money-prefix" aria-hidden="true">R$</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    enterKeyHint="done"
-                    onKeyDown={dismissKeyboardOnEnter}
-                    aria-invalid={Boolean(expenseErrors.amount)}
-                    placeholder="0,00"
-                    value={form.amount}
-                    onChange={e => {
-                      clearFieldError(setExpenseErrors, 'amount')
-                      setShareError('')
-                      setForm({ ...form, amount: formatMoneyInput(e.target.value) })
-                    }}
-                  />
-                </div>
-                {expenseErrors.amount && (
-                  <small className="field-error-msg" role="alert">
-                    {expenseErrors.amount}
-                  </small>
-                )}
-              </label>
-              <label className={expenseErrors.date ? 'is-invalid' : ''}>
-                Data da compra
-                <input
-                  type="date"
-                  aria-invalid={Boolean(expenseErrors.date)}
-                  value={form.date}
-                  onFocus={blurActiveInputOnTouch}
-                  onChange={e => {
-                    clearFieldError(setExpenseErrors, 'date')
-                    setShareError('')
-                    setForm({ ...form, date: e.target.value })
-                  }}
-                />
-                {expenseErrors.date && (
-                  <small className="field-error-msg" role="alert">
-                    {expenseErrors.date}
-                  </small>
-                )}
-              </label>
-            </div>
-            <div className="form-row">
-              <label>
-                Categoria
-                <select value={form.category || data.categories[0]?.id || ''} onFocus={blurActiveInputOnTouch} onChange={e => setForm({ ...form, category: e.target.value })}>
-                  {data.categories.map(c => (
-                    <option value={c.id} key={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Forma de pagamento
-                <select
-                  value={form.method}
-                  onFocus={blurActiveInputOnTouch}
-                  onChange={e => {
-                    const nextMethod = e.target.value as Method
-                    const fallbackCard = getPreferredCard()
-                    const nextCardId = nextMethod.startsWith('Crédito')
-                      ? (data.cards.some(c => c.id === form.cardId) ? form.cardId : fallbackCard?.id || '')
-                      : form.cardId
-                    const nextCard = data.cards.find(c => c.id === nextCardId) || fallbackCard
-                    clearFieldError(setExpenseErrors, 'installments')
-                    setForm({
-                      ...form,
-                      method: nextMethod,
-                      cardId: nextCardId,
-                      afterClosing: (nextCard?.closingDayRule ?? 'after') !== 'before',
-                      firstMonthMode: isManualBillingCard(nextCard) ? (form.firstMonthMode === 'auto' ? 'next' : form.firstMonthMode) : 'auto',
-                    })
-                  }}
-                >
-                  <option>PIX</option>
-                  <option>Débito</option>
-                  <option>Dinheiro</option>
-                  <option>Crédito à vista</option>
-                  <option>Crédito parcelado</option>
-                </select>
-              </label>
-            </div>
-            {form.method.startsWith('Crédito') && (
-              <>
-                <label>
-                  Cartão / Crédito
-                  <select
-                    value={form.cardId || getPreferredCard()?.id || ''}
-                    onFocus={blurActiveInputOnTouch}
-                    onChange={e => {
-                      const nextCard = data.cards.find(c => c.id === e.target.value) || getPreferredCard()
-                      rememberCard(e.target.value)
-                      setForm({
-                        ...form,
-                        cardId: e.target.value,
-                        afterClosing: (nextCard?.closingDayRule ?? 'after') !== 'before',
-                        firstMonthMode: isManualBillingCard(nextCard) ? 'next' : 'auto',
-                      })
-                    }}
-                  >
-                    {data.cards.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.kind === 'store'
-                          ? `🛍️ ${c.name} · Crédito de loja (mês definido na compra)`
-                          : c.kind === 'borrowed'
-                            ? `🤝 ${c.name} · Cartão emprestado (mês definido na compra)`
-                            : `🏦 ${c.name} · fecha dia ${c.closingDay} · vence dia ${c.dueDay}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {selectedFormCard && isManualFormCard && isDate(normalizedFormDate) && (
-                  <div className="first-month-selector">
-                    <span className="first-month-selector-label">
-                      {form.method === 'Crédito parcelado' ? 'Quando cai a 1ª parcela?' : 'Em qual mês cai a cobrança?'}
-                      <small>
-                        {selectedFormCard.kind === 'borrowed'
-                          ? 'Escolha em qual mês você combinou de pagar essa compra'
-                          : 'Confira no app da loja para qual mês ficou o 1º pagamento'}
-                      </small>
-                    </span>
-                    <div className="first-month-pills" role="radiogroup" aria-label="Mês da cobrança ou primeira parcela">
-                      {(
-                        [
-                          { mode: 'current' as const, label: 'Neste mês', targetMonth: purchaseBaseMonth },
-                          { mode: 'next' as const, label: 'Próximo mês', targetMonth: shiftMonthKey(purchaseBaseMonth, 1) },
-                          { mode: 'plus2' as const, label: 'Daqui a 2 meses', targetMonth: shiftMonthKey(purchaseBaseMonth, 2) },
-                        ]
-                      ).map(opt => {
-                        const isSelected = effectiveFirstMonthMode === opt.mode
-                        return (
-                          <button
-                            key={opt.mode}
-                            type="button"
-                            role="radio"
-                            aria-checked={isSelected}
-                            className={`first-month-pill ${isSelected ? 'is-selected' : ''}`}
-                            onClick={() => setForm({ ...form, firstMonthMode: opt.mode })}
-                          >
-                            <b>{opt.label}</b>
-                            <small>{monthName(opt.targetMonth)}</small>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-                {isFormOnClosingDay && selectedFormCard && (
-                  <label>
-                    Compra no dia do fechamento (dia {selectedFormCard.closingDay})
-                    <select value={form.afterClosing ? 'after' : 'before'} onFocus={blurActiveInputOnTouch} onChange={e => setForm({ ...form, afterClosing: e.target.value === 'after' })}>
-                      <option value="after">Após o fechamento da fatura (contabilizar no próximo mês)</option>
-                      <option value="before">Antes do fechamento da fatura (contabilizar neste mês)</option>
-                    </select>
-                  </label>
-                )}
-                {selectedFormCard && creditDueMonth && (
-                  <div className="billing-preview">
-                    <span>{selectedFormCard.kind === 'store' ? '🛍️' : selectedFormCard.kind === 'borrowed' ? '🤝' : '◷'}</span>
-                    <div>
-                      {form.method === 'Crédito parcelado' ? 'A 1ª parcela será contabilizada em' : 'Esta compra será contabilizada em'}{' '}
-                      <b>{monthName(creditDueMonth)}</b>
-                      {selectedFormCard.kind === 'store' ? (
-                        <> (Crédito de loja · escolha acima o mês informado pelo app após finalizar a compra).</>
-                      ) : selectedFormCard.kind === 'borrowed' ? (
-                        <> (Cartão emprestado · o valor ficará separado no resumo de {monthName(creditDueMonth)}).</>
-                      ) : (
-                        <>
-                          {' '}
-                          (fechamento dia {selectedFormCard.closingDay} · vencimento dia {selectedFormCard.dueDay}).
-                          {Number(normalizedFormDate.slice(-2)) > selectedFormCard.closingDay
-                            ? ' Como a compra ocorreu após o fechamento, ela entra na próxima fatura.'
-                            : Number(normalizedFormDate.slice(-2)) === selectedFormCard.closingDay
-                              ? form.afterClosing
-                                ? ' Fatura considerada fechada no momento da compra (próxima fatura).'
-                                : ' Fatura considerada aberta no momento da compra (fatura atual).'
-                              : ' Como a compra ocorreu antes do fechamento, ela entra na fatura atual.'}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-            {form.method === 'Crédito parcelado' && (
-              <label className={expenseErrors.installments ? 'is-invalid' : ''}>
-                Número de parcelas
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  enterKeyHint="done"
-                  onKeyDown={dismissKeyboardOnEnter}
-                  aria-invalid={Boolean(expenseErrors.installments)}
-                  placeholder="2 a 60"
-                  value={form.installments}
-                  onChange={e => {
-                    clearFieldError(setExpenseErrors, 'installments')
-                    setForm({ ...form, installments: e.target.value.replace(/\D/g, '').slice(0, 2) })
-                  }}
-                />
-                {expenseErrors.installments ? (
-                  <small className="field-error-msg" role="alert">
-                    {expenseErrors.installments}
-                  </small>
-                ) : (
-                  <small className="form-help">O valor será dividido automaticamente entre os meses.</small>
-                )}
-              </label>
-            )}
-            <fieldset className={`participants-field ${participantsSectionOpen ? 'is-open' : 'is-collapsed'}`}>
-              <button
-                type="button"
-                className="participants-collapse-toggle"
-                aria-expanded={participantsSectionOpen}
-                onClick={() => {
-                  blurActiveInputOnTouch()
-                  setParticipantsSectionOpen(current => !current)
-                }}
-              >
-                <div className="participants-collapse-title">
-                  <b>Alguém precisa te pagar?</b>
-                  {form.shares.length > 0 ? (
-                    <span className="participants-active-badge">
-                      {form.shares.length === 1 ? '1 divisão ativa' : `${form.shares.length} divisões ativas`}
-                      {totalFormSharesAmount > 0 ? ` · ${money(totalFormSharesAmount)}` : ''}
-                    </span>
-                  ) : (
-                    <small>Opcional · toque para dividir conta ou cobrar terceiros</small>
-                  )}
-                </div>
-                <span className={`participants-chevron ${participantsSectionOpen ? 'is-open' : ''}`} aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
-                </span>
-              </button>
-              {participantsSectionOpen && (
-                <div className="participants-collapsible-body">
-                  <p>Use o <b>Modo rápido</b> para dividir corridas/contas sem cadastrar ninguém ou selecione pessoas abaixo.</p>
-                  {(() => {
-                const quickShare = form.shares.find(item => item.participantId === QUICK_THIRD_PARTY_ID)
-                const quickErrorKey = `share-${QUICK_THIRD_PARTY_ID}`
-                const quickError = expenseErrors[quickErrorKey]
-                return (
-                  <div className={`quick-third-party-box ${quickShare ? 'is-active' : ''}`}>
-                    <div className="quick-third-party-head">
-                      <label className="participant-check">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(quickShare)}
-                          onChange={e => {
-                            blurActiveInputOnTouch()
-                            setShareError('')
-                            clearFieldError(setExpenseErrors, quickErrorKey)
-                            setForm({
-                              ...form,
-                              shares: e.target.checked
-                                ? [{ participantId: QUICK_THIRD_PARTY_ID, amount: '', installment: 'all' }, ...form.shares]
-                                : form.shares.filter(item => item.participantId !== QUICK_THIRD_PARTY_ID),
-                            })
-                          }}
-                        />
-                        <span>⚡ Terceiros (modo rápido sem cadastro)</span>
-                      </label>
-                      <div className="quick-split-pills" role="group" aria-label="Atalhos de divisão rápida">
-                        <button type="button" className="split-pill-btn" onClick={() => applyQuickThirdPartyPreset('plus1')} title="Dividir entre você e +1 pessoa (50% terceiros)">
-                          ÷ 2 comigo
-                        </button>
-                        <button type="button" className="split-pill-btn" onClick={() => applyQuickThirdPartyPreset('plus2')} title="Dividir entre você e +2 pessoas (2/3 terceiros)">
-                          ÷ 3 comigo
-                        </button>
-                        <button type="button" className="split-pill-btn" onClick={() => applyQuickThirdPartyPreset('plus3')} title="Dividir entre você e +3 pessoas (3/4 terceiros)">
-                          ÷ 4 comigo
-                        </button>
-                        <button type="button" className="split-pill-btn" onClick={() => applyQuickThirdPartyPreset('full')} title="100% pago por terceiros">
-                          100% terceiros
-                        </button>
-                      </div>
-                    </div>
-                    {quickShare && (
-                      <div className="participant-share-controls quick-share-controls">
-                        <label className={`participant-amount ${quickError ? 'is-invalid' : ''}`}>
-                          Valor de terceiros
-                          <div className="money-input-wrap compact">
-                            <span className="money-prefix" aria-hidden="true">R$</span>
-                            <input
-                              aria-label="Valor que terceiros devem pagar"
-                              aria-invalid={Boolean(quickError)}
-                              type="text"
-                              inputMode="decimal"
-                              enterKeyHint="done"
-                              onKeyDown={dismissKeyboardOnEnter}
-                              placeholder="0,00"
-                              value={quickShare.amount}
-                              onChange={e => {
-                                clearFieldError(setExpenseErrors, quickErrorKey)
-                                setShareError('')
-                                setForm({
-                                  ...form,
-                                  shares: form.shares.map(item =>
-                                    item.participantId === QUICK_THIRD_PARTY_ID ? { ...item, amount: formatMoneyInput(e.target.value) } : item,
-                                  ),
-                                })
-                              }}
-                            />
-                          </div>
-                          {quickError && (
-                            <small className="field-error-msg" role="alert">
-                              {quickError}
-                            </small>
-                          )}
-                        </label>
-                        {form.method === 'Crédito parcelado' && (
-                          <label className="participant-scope">
-                            Cobrança
-                            <select
-                              aria-label="Parcelas de terceiros (modo rápido)"
-                              value={quickShare.installment}
-                              onFocus={blurActiveInputOnTouch}
-                              onChange={e =>
-                                setForm({
-                                  ...form,
-                                  shares: form.shares.map(item =>
-                                    item.participantId === QUICK_THIRD_PARTY_ID ? { ...item, installment: e.target.value } : item,
-                                  ),
-                                })
-                              }
-                            >
-                              <option value="all">Todas</option>
-                              {Array.from({ length: Math.max(2, Number(form.installments) || 2) }, (_, i) => (
-                                <option key={i + 1} value={i + 1}>Só {i + 1}ª parcela</option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-              {form.shares.length > 0 && (
-                <div className="split-actions-bar">
-                  <span>Dividir entre marcados:</span>
-                  <div className="split-actions-buttons">
-                    <button type="button" className="split-action-btn" onClick={applyEqualSplitWithMe}>
-                      ÷ Igual comigo ({form.shares.length + 1} partes)
-                    </button>
-                    <button type="button" className="split-action-btn" onClick={applySplitAmongMarkedOnly}>
-                      100% entre marcados ({form.shares.length})
-                    </button>
-                  </div>
-                </div>
-              )}
-              {(data.participants || []).length ? (
-                <>
-                  {(data.participants || []).map(participant => {
-                    const share = form.shares.find(item => item.participantId === participant.id)
-                    const shareErrorKey = `share-${participant.id}`
-                    const participantError = expenseErrors[shareErrorKey]
-                    return (
-                      <div className="participant-share-row" key={participant.id}>
-                        <label className="participant-check">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(share)}
-                            onChange={e => {
-                              blurActiveInputOnTouch()
-                              setShareError('')
-                              clearFieldError(setExpenseErrors, shareErrorKey)
-                              setForm({
-                                ...form,
-                                shares: e.target.checked
-                                  ? [...form.shares, { participantId: participant.id, amount: '', installment: 'all' }]
-                                  : form.shares.filter(item => item.participantId !== participant.id),
-                              })
-                            }}
-                          />
-                          <span>{participant.name}</span>
-                        </label>
-                        {share && (
-                          <div className="participant-share-controls">
-                            <label className={`participant-amount ${participantError ? 'is-invalid' : ''}`}>
-                              Quanto?
-                              <div className="money-input-wrap compact">
-                                <span className="money-prefix" aria-hidden="true">R$</span>
-                                <input
-                                  aria-label={`Valor que ${participant.name} deve pagar`}
-                                  aria-invalid={Boolean(participantError)}
-                                  type="text"
-                                  inputMode="decimal"
-                                  enterKeyHint="done"
-                                  onKeyDown={dismissKeyboardOnEnter}
-                                  placeholder="0,00"
-                                  value={share.amount}
-                                  onChange={e => {
-                                    clearFieldError(setExpenseErrors, shareErrorKey)
-                                    setShareError('')
-                                    setForm({
-                                      ...form,
-                                      shares: form.shares.map(item =>
-                                        item.participantId === participant.id ? { ...item, amount: formatMoneyInput(e.target.value) } : item,
-                                      ),
-                                    })
-                                  }}
-                                />
-                              </div>
-                              {participantError && (
-                                <small className="field-error-msg" role="alert">
-                                  {participantError}
-                                </small>
-                              )}
-                            </label>
-                            {form.method === 'Crédito parcelado' && (
-                              <label className="participant-scope">
-                                Cobrança
-                                <select
-                                  aria-label={`Parcelas de ${participant.name}`}
-                                  value={share.installment}
-                                  onFocus={blurActiveInputOnTouch}
-                                  onChange={e =>
-                                    setForm({
-                                      ...form,
-                                      shares: form.shares.map(item => (item.participantId === participant.id ? { ...item, installment: e.target.value } : item)),
-                                    })
-                                  }
-                                >
-                                  <option value="all">Todas</option>
-                                  {Array.from({ length: Math.max(2, Number(form.installments) || 2) }, (_, i) => (
-                                    <option key={i + 1} value={i + 1}>Só {i + 1}ª parcela</option>
-                                  ))}
-                                </select>
-                              </label>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                  <button type="button" className="inline-participant-btn" onClick={addParticipantFromExpense}>
-                    ＋ Cadastrar outra pessoa com nome
-                  </button>
-                </>
-              ) : (
-                <div className="participants-empty">
-                  Quer acompanhar por nome quem te deve?{' '}
-                  <button type="button" className="inline-participant-btn" onClick={addParticipantFromExpense}>
-                    ＋ Cadastrar pessoa
-                  </button>
-                </div>
-              )}
-              {validFormAmount > 0 && form.shares.length > 0 && (
-                <div className={`split-live-summary ${totalFormSharesAmount > validFormAmount ? 'is-over' : ''}`} role="status">
-                  <span>Total: <b>{money(validFormAmount)}</b></span>
-                  <span>Terceiros: <b>{money(totalFormSharesAmount)}</b></span>
-                  <span className="split-live-personal">
-                    {totalFormSharesAmount > validFormAmount
-                      ? `Excede o total em ${money(totalFormSharesAmount - validFormAmount)}`
-                      : `Sua parte: ${money(personalFormPreview)}`}
-                  </span>
-                </div>
-              )}
-              {shareError && (
-                <div className="share-error" role="alert">
-                  {shareError}
-                </div>
-              )}
-                </div>
-              )}
-            </fieldset>
-            {!editingExpenseId && (
-              <label className="keep-modal-open-check">
-                <input
-                  type="checkbox"
-                  checked={keepExpenseModalOpen}
-                  onChange={e => {
-                    blurActiveInputOnTouch()
-                    setKeepExpenseModalOpen(e.target.checked)
-                  }}
-                />
-                <span>Continuar adicionando outra despesa após salvar</span>
-              </label>
-            )}
-            <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={closeExpenseModal}>
-                Cancelar
-              </button>
-              <button className="primary" type="submit">
-                {editingExpenseId ? 'Salvar alterações' : keepExpenseModalOpen ? 'Salvar e adicionar outra' : 'Salvar lançamento'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      <ExpenseModal
+        modal={modal}
+        closingModal={closingModal}
+        formShake={formShake}
+        onClearShake={() => setFormShake(null)}
+        editingExpenseId={editingExpenseId}
+        expenseDescInputRef={expenseDescInputRef}
+        form={form}
+        setForm={setForm}
+        expenseErrors={expenseErrors}
+        onClearExpenseError={field => clearFieldError(setExpenseErrors, field)}
+        shareError={shareError}
+        setShareError={setShareError}
+        categories={data.categories}
+        cards={data.cards}
+        participants={data.participants || []}
+        getPreferredCard={getPreferredCard}
+        rememberCard={rememberCard}
+        selectedFormCard={selectedFormCard}
+        isManualFormCard={isManualFormCard}
+        normalizedFormDate={normalizedFormDate}
+        purchaseBaseMonth={purchaseBaseMonth}
+        effectiveFirstMonthMode={effectiveFirstMonthMode}
+        isFormOnClosingDay={isFormOnClosingDay}
+        creditDueMonth={creditDueMonth}
+        participantsSectionOpen={participantsSectionOpen}
+        setParticipantsSectionOpen={setParticipantsSectionOpen}
+        totalFormSharesAmount={totalFormSharesAmount}
+        validFormAmount={validFormAmount}
+        personalFormPreview={personalFormPreview}
+        applyQuickThirdPartyPreset={applyQuickThirdPartyPreset}
+        applyEqualSplitWithMe={applyEqualSplitWithMe}
+        applySplitAmongMarkedOnly={applySplitAmongMarkedOnly}
+        addParticipantFromExpense={addParticipantFromExpense}
+        keepExpenseModalOpen={keepExpenseModalOpen}
+        setKeepExpenseModalOpen={setKeepExpenseModalOpen}
+        onClose={closeExpenseModal}
+        onSubmit={addExpense}
+      />
 
-      {recurrenceEditor && (
-        <div
-          className={`modal-backdrop ${closingModal === 'recurrence' ? 'is-closing' : ''}`}
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) closeRecurrenceModal()
-          }}
-        >
-          <form
-            noValidate
-            className={`modal recurrence-modal ${formShake === 'recurrence' ? 'is-shaking' : ''}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="recurrence-modal-title"
-            onSubmit={saveRecurrence}
-            onAnimationEnd={event => {
-              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
-            }}
-          >
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">DESPESA MENSAL</span>
-                <h2 id="recurrence-modal-title">{recurrenceEditor.id ? 'Editar recorrência' : 'Nova recorrência'}</h2>
-              </div>
-              <button type="button" aria-label="Fechar recorrência" onClick={closeRecurrenceModal}>
-                ×
-              </button>
-            </div>
-            <label className={recurrenceErrors.description ? 'is-invalid' : ''}>
-              Descrição
-              <input
-                autoFocus={!isTouchDevice()}
-                enterKeyHint="done"
-                onKeyDown={dismissKeyboardOnEnter}
-                maxLength={70}
-                aria-invalid={Boolean(recurrenceErrors.description)}
-                placeholder="Ex.: Internet, academia..."
-                value={recurrenceEditor.description}
-                onChange={event => {
-                  clearFieldError(setRecurrenceErrors, 'description')
-                  setRecurrenceEditor({ ...recurrenceEditor, description: event.target.value })
-                }}
-              />
-              {recurrenceErrors.description && (
-                <small className="field-error-msg" role="alert">
-                  {recurrenceErrors.description}
-                </small>
-              )}
-            </label>
-            <div className="form-row">
-              <label className={recurrenceErrors.amount ? 'is-invalid' : ''}>
-                Valor mensal
-                <div className="money-input-wrap">
-                  <span className="money-prefix" aria-hidden="true">R$</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    enterKeyHint="done"
-                    onKeyDown={dismissKeyboardOnEnter}
-                    aria-invalid={Boolean(recurrenceErrors.amount)}
-                    placeholder="0,00"
-                    value={recurrenceEditor.amount}
-                    onChange={event => {
-                      clearFieldError(setRecurrenceErrors, 'amount')
-                      setRecurrenceEditor({ ...recurrenceEditor, amount: formatMoneyInput(event.target.value) })
-                    }}
-                  />
-                </div>
-                {recurrenceErrors.amount && (
-                  <small className="field-error-msg" role="alert">
-                    {recurrenceErrors.amount}
-                  </small>
-                )}
-              </label>
-              <label className={recurrenceErrors.day ? 'is-invalid' : ''}>
-                Dia da cobrança
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  enterKeyHint="done"
-                  onKeyDown={dismissKeyboardOnEnter}
-                  aria-invalid={Boolean(recurrenceErrors.day)}
-                  placeholder="1 a 31"
-                  value={recurrenceEditor.day}
-                  onChange={event => {
-                    clearFieldError(setRecurrenceErrors, 'day')
-                    setRecurrenceEditor({ ...recurrenceEditor, day: event.target.value.replace(/\D/g, '').slice(0, 2) })
-                  }}
-                />
-                {recurrenceErrors.day && (
-                  <small className="field-error-msg" role="alert">
-                    {recurrenceErrors.day}
-                  </small>
-                )}
-              </label>
-            </div>
-            <div className="form-row">
-              <label>
-                Categoria
-                <select value={recurrenceEditor.category} onFocus={blurActiveInputOnTouch} onChange={event => setRecurrenceEditor({ ...recurrenceEditor, category: event.target.value })}>
-                  {data.categories.map(category => (
-                    <option key={category.id} value={category.id}>{category.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Pagamento
-                <select value={recurrenceEditor.method} onFocus={blurActiveInputOnTouch} onChange={event => setRecurrenceEditor({ ...recurrenceEditor, method: event.target.value as Method })}>
-                  <option>PIX</option>
-                  <option>Débito</option>
-                  <option>Dinheiro</option>
-                  {data.cards.length > 0 && <option>Crédito à vista</option>}
-                </select>
-              </label>
-            </div>
-            {recurrenceEditor.method.startsWith('Crédito') && (
-              <label>
-                Cartão
-                <select value={recurrenceEditor.cardId} onFocus={blurActiveInputOnTouch} onChange={event => setRecurrenceEditor({ ...recurrenceEditor, cardId: event.target.value })}>
-                  {data.cards.map(card => (
-                    <option key={card.id} value={card.id}>
-                      {card.kind === 'store' ? '🛍️' : card.kind === 'borrowed' ? '🤝' : '🏦'} {card.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <p className="form-help">A recorrência só vira lançamento quando você confirma na revisão mensal. Você pode pular uma cobrança ou pausar o modelo.</p>
-            <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={closeRecurrenceModal}>
-                Cancelar
-              </button>
-              <button className="primary" type="submit">
-                {recurrenceEditor.id ? 'Salvar alterações' : 'Criar modelo'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      <SettingsAndRecurrenceModals
+        closingModal={closingModal}
+        formShake={formShake}
+        onClearShake={() => setFormShake(null)}
+        categories={data.categories}
+        cards={data.cards}
+        recurrenceEditor={recurrenceEditor}
+        setRecurrenceEditor={setRecurrenceEditor}
+        recurrenceErrors={recurrenceErrors}
+        onClearRecurrenceError={field => clearFieldError(setRecurrenceErrors, field)}
+        onCloseRecurrence={closeRecurrenceModal}
+        onSaveRecurrence={saveRecurrence}
+        settingsModal={settingsModal}
+        setSettingsModal={setSettingsModal}
+        settingsErrors={settingsErrors}
+        onClearSettingsError={field => clearFieldError(setSettingsErrors, field)}
+        onCloseSettings={closeSettingsModal}
+        onSaveSettings={saveSetting}
+      />
 
-      {confirmDialog && (
-        <div
-          className={`modal-backdrop ${closingModal === 'confirm' ? 'is-closing' : ''}`}
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) closeConfirmDialog()
-          }}
-        >
-          <section className="modal confirm-dialog-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">{confirmDialog.eyebrow}</span>
-                <h2 id="confirm-dialog-title">{confirmDialog.title}</h2>
-              </div>
-              <button type="button" aria-label="Fechar confirmação" onClick={closeConfirmDialog}>
-                ×
-              </button>
-            </div>
-            <p className="confirm-dialog-description">{confirmDialog.description}</p>
-            <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={closeConfirmDialog}>
-                Cancelar
-              </button>
-              <button type="button" className="danger-btn" onClick={confirmDialog.onConfirm}>
-                {confirmDialog.confirmLabel}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      <AppUtilityModals
+        closingModal={closingModal}
+        formShake={formShake}
+        onClearShake={() => setFormShake(null)}
+        confirmDialog={confirmDialog}
+        onCloseConfirmDialog={closeConfirmDialog}
+        pendingBackupImport={pendingBackupImport}
+        onCloseBackupConfirm={closeBackupConfirmModal}
+        onConfirmBackupImport={confirmBackupImport}
+        resetDataModalOpen={resetDataModalOpen}
+        onCloseResetDataModal={closeResetDataModal}
+        onConfirmResetAllData={confirmResetAllData}
+        onDownloadBackup={downloadBackup}
+        resetConfirmText={resetConfirmText}
+        setResetConfirmText={setResetConfirmText}
+        resetConfirmError={resetConfirmError}
+        setResetConfirmError={setResetConfirmError}
+        onboardingOpen={onboardingOpen}
+        onCompleteOnboarding={completeOnboarding}
+        profilePhoto={profilePhoto}
+        profileName={profileName}
+        onUpdateProfileName={updateProfileName}
+        profilePhotoInputRef={profilePhotoInput}
+        onRemoveProfilePhoto={removeProfilePhoto}
+        profileMessage={profileMessage}
+        theme={theme}
+        onUpdateDefaultTheme={updateDefaultTheme}
+        hasExistingData={hasExistingData}
+        onboardingStartMode={onboardingStartMode}
+        setOnboardingStartMode={setOnboardingStartMode}
+        backupInputRef={backupInput}
+        easterEggOpen={easterEggOpen}
+        onCloseEasterEgg={closeEasterEgg}
+        easterEggMessage={easterEggMessage}
+        setEasterEggMessage={setEasterEggMessage}
+        easterEggPassword={easterEggPassword}
+        setEasterEggPassword={setEasterEggPassword}
+        easterEggError={easterEggError}
+        setEasterEggError={setEasterEggError}
+        easterEggShake={easterEggShake}
+        setEasterEggShake={setEasterEggShake}
+        easterEggInputRef={easterEggInputRef}
+        onSubmitEasterEgg={submitEasterEgg}
+        pwaGuideOpen={pwaGuideOpen}
+        onClosePwaGuide={closePwaGuideModal}
+      />
 
-      {settingsModal && (
-        <div
-          className={`modal-backdrop ${closingModal === 'settings' ? 'is-closing' : ''}`}
-          onMouseDown={e => {
-            if (e.target === e.currentTarget) closeSettingsModal()
-          }}
-        >
-          <form
-            noValidate
-            className={`modal settings-modal ${formShake === 'settings' ? 'is-shaking' : ''}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-modal-title"
-            onSubmit={saveSetting}
-            onAnimationEnd={event => {
-              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
-            }}
-          >
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">AJUSTES</span>
-                <h2 id="settings-modal-title">
-                  {settingsModal.id ? 'Editar' : 'Novo'}{' '}
-                  {settingsModal.kind === 'category' ? 'categoria' : settingsModal.kind === 'card' ? 'cartão / crédito' : 'participante'}
-                </h2>
-              </div>
-              <button type="button" aria-label="Fechar ajustes" onClick={closeSettingsModal}>
-                ×
-              </button>
-            </div>
-            {settingsModal.kind === 'card' && (
-              <div className="card-kind-selector" role="radiogroup" aria-label="Tipo de crédito">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={settingsModal.cardKind === 'bank'}
-                  className={`card-kind-option ${settingsModal.cardKind === 'bank' ? 'is-selected' : ''}`}
-                  onClick={() => setSettingsModal({ ...settingsModal, cardKind: 'bank' })}
-                >
-                  <span className="card-kind-icon" aria-hidden="true">🏦</span>
-                  <div>
-                    <b>Cartão tradicional</b>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={settingsModal.cardKind === 'store'}
-                  className={`card-kind-option ${settingsModal.cardKind === 'store' ? 'is-selected' : ''}`}
-                  onClick={() => {
-                    clearFieldError(setSettingsErrors, 'closingDay')
-                    clearFieldError(setSettingsErrors, 'dueDay')
-                    setSettingsModal({ ...settingsModal, cardKind: 'store' })
-                  }}
-                >
-                  <span className="card-kind-icon" aria-hidden="true">🛍️</span>
-                  <div>
-                    <b>Crédito de loja</b>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={settingsModal.cardKind === 'borrowed'}
-                  className={`card-kind-option ${settingsModal.cardKind === 'borrowed' ? 'is-selected' : ''}`}
-                  onClick={() => {
-                    clearFieldError(setSettingsErrors, 'closingDay')
-                    clearFieldError(setSettingsErrors, 'dueDay')
-                    setSettingsModal({ ...settingsModal, cardKind: 'borrowed' })
-                  }}
-                >
-                  <span className="card-kind-icon" aria-hidden="true">🤝</span>
-                  <div>
-                    <b>Cartão emprestado</b>
-                  </div>
-                </button>
-              </div>
-            )}
-            <label className={settingsErrors.name ? 'is-invalid' : ''}>
-              Nome
-              <input
-                autoFocus={!isTouchDevice()}
-                enterKeyHint="done"
-                onKeyDown={dismissKeyboardOnEnter}
-                maxLength={40}
-                aria-invalid={Boolean(settingsErrors.name)}
-                placeholder={
-                  settingsModal.kind === 'category'
-                    ? 'Ex.: Educação'
-                    : settingsModal.kind === 'card'
-                      ? settingsModal.cardKind === 'store'
-                        ? 'Ex.: Shopee Pay, Mercado Crédito, Parcela AliExpress'
-                        : settingsModal.cardKind === 'borrowed'
-                          ? 'Ex.: Cartão da Mãe, Cartão do Pai'
-                          : 'Ex.: Cartão principal'
-                      : 'Ex.: Maria'
-                }
-                value={settingsModal.name}
-                onChange={e => {
-                  clearFieldError(setSettingsErrors, 'name')
-                  setSettingsModal({ ...settingsModal, name: e.target.value })
-                }}
-              />
-              {settingsErrors.name && (
-                <small className="field-error-msg" role="alert">
-                  {settingsErrors.name}
-                </small>
-              )}
-              {settingsModal.kind === 'card' && (settingsModal.cardKind === 'store' || settingsModal.cardKind === 'borrowed') && (
-                <div className="store-card-presets">
-                  <span>Sugestões rápidas:</span>
-                  {(settingsModal.cardKind === 'store'
-                    ? ['Shopee Pay', 'Mercado Crédito', 'Parcela (AliExpress)']
-                    : ['Cartão da Mãe', 'Cartão do Pai', 'Cartão de Familiar']
-                  ).map(presetName => (
-                    <button
-                      key={presetName}
-                      type="button"
-                      className={`store-preset-chip ${settingsModal.name.trim().toLowerCase() === presetName.toLowerCase() ? 'is-active' : ''}`}
-                      onClick={() => {
-                        clearFieldError(setSettingsErrors, 'name')
-                        setSettingsModal({ ...settingsModal, name: presetName })
-                      }}
-                    >
-                      {presetName}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </label>
-            {settingsModal.kind === 'category' ? (
-              <div className={`category-color-field ${settingsErrors.color ? 'is-invalid' : ''}`}>
-                {(() => {
-                  const safeColor = /^#[0-9a-fA-F]{6}$/.test(settingsModal.color) ? settingsModal.color : '#6e7f72'
-                  const hsl = hexToHsl(safeColor)
-                  const applyHsl = (nextH: number, nextS: number, nextL: number) => {
-                    clearFieldError(setSettingsErrors, 'color')
-                    const nextHex = hslToHex(nextH, nextS, nextL)
-                    setSettingsModal(current => (current ? { ...current, color: nextHex } : current))
-                  }
-                  return (
-                    <>
-                      <div className="category-modal-preview" aria-label="Prévia da categoria">
-                        <span className="category-icon" style={{ color: safeColor, background: `${safeColor}22` }}>
-                          {categorySymbol(settingsModal.id, settingsModal.name)}
-                        </span>
-                        <div className="category-modal-preview-text">
-                          <b>{settingsModal.name.trim() || 'Prévia da categoria'}</b>
-                          <small>O ícone se adapta automaticamente ao nome (ex.: TCG, Games, Uber/99, Assinaturas)</small>
-                        </div>
-                        <span className="category-label">
-                          <i style={{ background: safeColor }} />
-                          {settingsModal.name.trim() || 'Categoria'}
-                        </span>
-                      </div>
-                      <span className="category-color-label">Cores sugeridas</span>
-                      <div className="color-swatch-grid" role="radiogroup" aria-label="Paleta de cores da categoria">
-                        {CATEGORY_COLOR_PRESETS.map(preset => {
-                          const isSelected = settingsModal.color.toLowerCase() === preset.color.toLowerCase()
-                          return (
-                            <button
-                              key={preset.color}
-                              type="button"
-                              role="radio"
-                              aria-checked={isSelected}
-                              aria-label={preset.label}
-                              title={preset.label}
-                              className={`color-swatch ${isSelected ? 'is-selected' : ''}`}
-                              style={{ backgroundColor: preset.color }}
-                              onClick={() => {
-                                clearFieldError(setSettingsErrors, 'color')
-                                setSettingsModal(current => (current ? { ...current, color: preset.color } : current))
-                              }}
-                            >
-                              {isSelected && <span aria-hidden="true">✓</span>}
-                            </button>
-                          )
-                        })}
-                      </div>
-                      <div className="visual-color-picker" data-no-swipe="true">
-                        <div className="visual-color-head">
-                          <span className="category-color-label">Cor personalizada (arraste para escolher)</span>
-                          <div className="tone-pills" role="group" aria-label="Tom da cor">
-                            {[
-                              { label: 'Suave', s: 36, l: 58 },
-                              { label: 'Equilibrado', s: 52, l: 50 },
-                              { label: 'Vibrante', s: 78, l: 54 },
-                              { label: 'Intenso', s: 65, l: 40 },
-                            ].map(tone => {
-                              const isToneActive = Math.abs(hsl.s - tone.s) <= 10 && Math.abs(hsl.l - tone.l) <= 7
-                              return (
-                                <button
-                                  key={tone.label}
-                                  type="button"
-                                  className={`tone-pill-btn ${isToneActive ? 'is-active' : ''}`}
-                                  onClick={() => applyHsl(hsl.h, tone.s, tone.l)}
-                                >
-                                  {tone.label}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </div>
-                        <input
-                          type="range"
-                          className="hue-slider"
-                          aria-label="Escolher matiz da cor"
-                          min={0}
-                          max={360}
-                          value={hsl.h}
-                          onChange={e => applyHsl(Number(e.target.value), Math.max(35, hsl.s || 55), Math.min(62, Math.max(38, hsl.l || 50)))}
-                        />
-                        <div className={`custom-hex-row ${settingsErrors.color ? 'is-invalid' : ''}`}>
-                          <label className="native-color-picker-btn" title="Abrir roda de cores do sistema">
-                            <input
-                              type="color"
-                              aria-label="Abrir seletor visual de cores"
-                              value={safeColor}
-                              onChange={e => {
-                                clearFieldError(setSettingsErrors, 'color')
-                                setSettingsModal(current => (current ? { ...current, color: e.target.value.toLowerCase() } : current))
-                              }}
-                            />
-                            <span className="custom-hex-preview" style={{ backgroundColor: safeColor }} aria-hidden="true" />
-                            <span>Abrir seletor visual</span>
-                          </label>
-                          <input
-                            type="text"
-                            className="hex-code-input"
-                            maxLength={7}
-                            enterKeyHint="done"
-                            onKeyDown={dismissKeyboardOnEnter}
-                            aria-label="Código hexadecimal da cor (opcional)"
-                            aria-invalid={Boolean(settingsErrors.color)}
-                            placeholder="#6E7F72"
-                            value={settingsModal.color.toUpperCase()}
-                            onChange={e => {
-                              clearFieldError(setSettingsErrors, 'color')
-                              const raw = e.target.value.replace(/[^#0-9a-fA-F]/g, '')
-                              const next = raw.startsWith('#') ? `#${raw.slice(1).replace(/#/g, '').slice(0, 6)}` : `#${raw.replace(/#/g, '').slice(0, 6)}`
-                              setSettingsModal(current => (current ? { ...current, color: next } : current))
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </>
-                  )
-                })()}
-                {settingsErrors.color && (
-                  <small className="field-error-msg" role="alert">
-                    {settingsErrors.color}
-                  </small>
-                )}
-              </div>
-            ) : settingsModal.kind === 'card' ? (
-              settingsModal.cardKind === 'store' || settingsModal.cardKind === 'borrowed' ? (
-                <div className="store-card-info-box" role="note">
-                  <span aria-hidden="true">{settingsModal.cardKind === 'borrowed' ? '🤝' : '🛍️'}</span>
-                  <div>
-                    <b>{settingsModal.cardKind === 'borrowed' ? 'Sem precisar saber o fechamento da fatura' : 'Sem data fixa de fechamento'}</b>
-                    <p>
-                      {settingsModal.cardKind === 'borrowed' ? (
-                        <>
-                          Ideal quando você passa uma compra no cartão da mãe, familiar ou amigo. Ao lançar a despesa nesse cartão, basta tocar em <b>Neste mês</b> ou <b>Próximo mês</b> e o valor ficará separado no resumo daquele mês.
-                        </>
-                      ) : (
-                        <>
-                          Como o Shopee Pay, Mercado Crédito e Parcela (AliExpress) só informam a data de cobrança após finalizar o pedido, você não precisa informar dia de fechamento aqui. Na hora de lançar a compra, basta tocar em <b>Neste mês</b> ou <b>Próximo mês</b>.
-                        </>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="form-row">
-                    <label className={settingsErrors.closingDay ? 'is-invalid' : ''}>
-                      Dia de fechamento
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        enterKeyHint="done"
-                        onKeyDown={dismissKeyboardOnEnter}
-                        aria-invalid={Boolean(settingsErrors.closingDay)}
-                        placeholder="1 a 31"
-                        value={settingsModal.closingDay}
-                        onChange={e => {
-                          clearFieldError(setSettingsErrors, 'closingDay')
-                          setSettingsModal({ ...settingsModal, closingDay: e.target.value.replace(/\D/g, '').slice(0, 2) })
-                        }}
-                      />
-                      {settingsErrors.closingDay ? (
-                        <small className="field-error-msg" role="alert">
-                          {settingsErrors.closingDay}
-                        </small>
-                      ) : (
-                        <small className="form-help">Compras após este dia entram na próxima fatura.</small>
-                      )}
-                    </label>
-                    <label className={settingsErrors.dueDay ? 'is-invalid' : ''}>
-                      Dia de vencimento
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        enterKeyHint="done"
-                        onKeyDown={dismissKeyboardOnEnter}
-                        aria-invalid={Boolean(settingsErrors.dueDay)}
-                        placeholder="1 a 31"
-                        value={settingsModal.dueDay}
-                        onChange={e => {
-                          clearFieldError(setSettingsErrors, 'dueDay')
-                          setSettingsModal({ ...settingsModal, dueDay: e.target.value.replace(/\D/g, '').slice(0, 2) })
-                        }}
-                      />
-                      {settingsErrors.dueDay && (
-                        <small className="field-error-msg" role="alert">
-                          {settingsErrors.dueDay}
-                        </small>
-                      )}
-                    </label>
-                  </div>
-                  <label>
-                    Compras no dia do fechamento
-                    <select
-                      value={settingsModal.closingDayRule}
-                      onFocus={blurActiveInputOnTouch}
-                      onChange={e => setSettingsModal({ ...settingsModal, closingDayRule: e.target.value as ClosingDayRule })}
-                    >
-                      <option value="after">Fatura já fechada (contabilizar na próxima fatura)</option>
-                      <option value="before">Fatura ainda aberta (contabilizar na fatura atual)</option>
-                    </select>
-                    <small className="form-help">Regra padrão aplicada quando uma compra é feita no próprio dia de fechamento.</small>
-                  </label>
-                </>
-              )
-            ) : (
-              <p className="form-help participant-modal-help">
-                Os valores atribuídos a esta pessoa ficarão associados aos lançamentos correspondentes e serão salvos apenas neste dispositivo.
-              </p>
-            )}
-            <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={closeSettingsModal}>
-                Cancelar
-              </button>
-              <button className="primary" type="submit">
-                {settingsModal.id ? 'Salvar alterações' : 'Adicionar'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {pendingBackupImport && (
-        <div
-          className={`modal-backdrop ${closingModal === 'backup' ? 'is-closing' : ''}`}
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) closeBackupConfirmModal()
-          }}
-        >
-          <section className="modal backup-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="backup-confirm-title">
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">SEUS DADOS</span>
-                <h2 id="backup-confirm-title">Importar backup?</h2>
-              </div>
-              <button type="button" aria-label="Fechar" onClick={closeBackupConfirmModal}>
-                ×
-              </button>
-            </div>
-            <p>Esta ação vai substituir os dados salvos neste navegador.</p>
-            {pendingBackupImport.preferences && (
-              <p>O arquivo também contém suas preferências, como tema, tela inicial, limite mensal e perfil.</p>
-            )}
-            <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={closeBackupConfirmModal}>
-                Cancelar
-              </button>
-              <button type="button" className="primary" onClick={confirmBackupImport}>
-                Importar e substituir
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {resetDataModalOpen && (
-        <div
-          className={`modal-backdrop ${closingModal === 'reset' ? 'is-closing' : ''}`}
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) closeResetDataModal()
-          }}
-        >
-          <form
-            noValidate
-            className={`modal reset-data-modal ${formShake === 'reset' ? 'is-shaking' : ''}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="reset-data-title"
-            onSubmit={confirmResetAllData}
-            onAnimationEnd={event => {
-              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
-            }}
-          >
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">ZONA DE SEGURANÇA</span>
-                <h2 id="reset-data-title">Excluir todos os dados?</h2>
-              </div>
-              <button type="button" aria-label="Fechar confirmação de exclusão" onClick={closeResetDataModal}>
-                ×
-              </button>
-            </div>
-            <div className="reset-warning-box" role="note">
-              <b>Esta ação não pode ser desfeita.</b>
-              <p>
-                Todos os lançamentos, recorrências, categorias, cartões, participantes e o seu perfil salvos neste navegador serão apagados permanentemente,
-                e o Põe na Conta voltará para a tela inicial de cadastro.
-              </p>
-            </div>
-            <button type="button" className="outline-btn reset-backup-shortcut" onClick={downloadBackup}>
-              ↓ Baixar backup JSON antes de excluir
-            </button>
-            <label className={resetConfirmError ? 'easter-egg-field is-invalid' : 'easter-egg-field'}>
-              Para confirmar, digite <b>EXCLUIR</b> abaixo
-              <input
-                autoFocus={!isTouchDevice()}
-                type="text"
-                enterKeyHint="done"
-                onKeyDown={dismissKeyboardOnEnter}
-                placeholder="Digite EXCLUIR"
-                aria-invalid={resetConfirmError}
-                value={resetConfirmText}
-                onChange={event => {
-                  setResetConfirmText(event.target.value)
-                  if (resetConfirmError) setResetConfirmError(false)
-                }}
-              />
-              {resetConfirmError && (
-                <small className="field-error-msg" role="alert">
-                  Digite exatamente a palavra EXCLUIR para liberar a limpeza dos dados.
-                </small>
-              )}
-            </label>
-            <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={closeResetDataModal}>
-                Cancelar
-              </button>
-              <button type="submit" className="danger-btn">
-                Excluir tudo e recomeçar
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {onboardingOpen && (
-        <div className={`modal-backdrop onboarding-backdrop ${closingModal === 'onboarding' ? 'is-closing' : ''}`}>
-          <form noValidate className="modal onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" onSubmit={completeOnboarding}>
-            <div className="onboarding-brand">
-              <span className="brand-mark">
-                <svg viewBox="0 0 48 48" shapeRendering="crispEdges" aria-hidden="true">
-                  <rect x="1" y="1" width="46" height="46" rx="13" fill="#20231f" />
-                  <path d="M18 6h12v3h6v6h3v6h3v12h-3v6h-6v3H18v-3h-6v-6H9v-6H6V18h3v-6h6V9h3z" fill="#986027" />
-                  <path d="M18 9h12v3h6v6h3v12h-3v6h-6v3H18v-3h-6v-6H9V18h3v-6h6z" fill="#e8b957" />
-                  <path d="M18 12h12v3h6v3h-3v3h-3v-3H18v-3h-3v-3h3z" fill="#f6d77e" />
-                  <rect x="22" y="14" width="4" height="20" fill="#80501f" />
-                  <rect x="18" y="17" width="12" height="3" fill="#80501f" />
-                  <rect x="15" y="20" width="3" height="3" fill="#80501f" />
-                  <rect x="18" y="23" width="12" height="3" fill="#80501f" />
-                  <rect x="27" y="26" width="3" height="3" fill="#80501f" />
-                  <rect x="18" y="29" width="12" height="3" fill="#80501f" />
-                  <rect x="12" y="18" width="3" height="6" fill="#f6d77e" />
-                </svg>
-              </span>
-              <div>
-                <span className="eyebrow">BOAS-VINDAS AO PÕE NA CONTA</span>
-                <h2 id="onboarding-title">Configure seu perfil</h2>
-                <p>Personalize como seu espaço aparece neste navegador. Tudo pode ser alterado depois em Ajustes.</p>
-              </div>
-            </div>
-            <div className="onboarding-profile-box">
-              <div className={`avatar onboarding-avatar profile-avatar ${profilePhoto ? 'has-photo' : ''}`}>
-                {profilePhoto ? (
-                  <img src={profilePhoto} alt="" />
-                ) : profileName.trim() ? (
-                  profileInitials(profileName)
-                ) : (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <circle cx="12" cy="8" r="4" />
-                    <path d="M4 21a8 8 0 0 1 16 0" />
-                  </svg>
-                )}
-              </div>
-              <div className="onboarding-profile-fields">
-                <label>
-                  Como quer ser chamado(a)?
-                  <input
-                    autoFocus={!isTouchDevice()}
-                    type="text"
-                    enterKeyHint="done"
-                    onKeyDown={dismissKeyboardOnEnter}
-                    maxLength={60}
-                    placeholder="Ex.: Gabriel"
-                    value={profileName}
-                    onChange={event => updateProfileName(event.target.value)}
-                  />
-                </label>
-                <div className="profile-photo-actions">
-                  <button
-                    type="button"
-                    className="outline-btn"
-                    onClick={() => {
-                      blurActiveInputOnTouch()
-                      profilePhotoInput.current?.click()
-                    }}
-                  >
-                    {profilePhoto ? 'Trocar foto' : 'Adicionar foto'}
-                  </button>
-                  {profilePhoto && (
-                    <button type="button" className="text-btn" onClick={removeProfilePhoto}>
-                      Remover foto
-                    </button>
-                  )}
-                </div>
-                {profileMessage && (
-                  <small className="profile-message" role="status">
-                    {profileMessage}
-                  </small>
-                )}
-              </div>
-            </div>
-            <div className="onboarding-section">
-              <span className="onboarding-label">Aparência</span>
-              <div className="onboarding-options two-cols" role="radiogroup" aria-label="Tema da interface">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={theme === 'light'}
-                  className={`onboarding-option ${theme === 'light' ? 'is-selected' : ''}`}
-                  onClick={() => {
-                    blurActiveInputOnTouch()
-                    updateDefaultTheme('light')
-                  }}
-                >
-                  <span className="onboarding-option-icon">☀</span>
-                  <div>
-                    <b>Tema claro</b>
-                    <small>Fundo suave e leitura diurna</small>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={theme === 'dark'}
-                  className={`onboarding-option ${theme === 'dark' ? 'is-selected' : ''}`}
-                  onClick={() => {
-                    blurActiveInputOnTouch()
-                    updateDefaultTheme('dark')
-                  }}
-                >
-                  <span className="onboarding-option-icon">☾</span>
-                  <div>
-                    <b>Tema escuro</b>
-                    <small>Contraste confortável à noite</small>
-                  </div>
-                </button>
-              </div>
-            </div>
-            <div className="onboarding-section">
-              <span className="onboarding-label">Como deseja começar?</span>
-              <div className="onboarding-options" role="radiogroup" aria-label="Dados iniciais">
-                {hasExistingData && (
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={onboardingStartMode === 'keep'}
-                    className={`onboarding-option ${onboardingStartMode === 'keep' ? 'is-selected' : ''}`}
-                    onClick={() => {
-                      blurActiveInputOnTouch()
-                      setOnboardingStartMode('keep')
-                    }}
-                  >
-                    <span className="onboarding-option-icon">✓</span>
-                    <div>
-                      <b>Manter meus lançamentos atuais</b>
-                      <small>Preserva os registros que já estão salvos neste navegador.</small>
-                    </div>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={onboardingStartMode === 'empty'}
-                  className={`onboarding-option ${onboardingStartMode === 'empty' ? 'is-selected' : ''}`}
-                  onClick={() => {
-                    blurActiveInputOnTouch()
-                    setOnboardingStartMode('empty')
-                  }}
-                >
-                  <span className="onboarding-option-icon">✨</span>
-                  <div>
-                    <b>Começar do zero</b>
-                    <small>Conta limpa, pronta para registrar seus próprios gastos.</small>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={onboardingStartMode === 'demo'}
-                  className={`onboarding-option ${onboardingStartMode === 'demo' ? 'is-selected' : ''}`}
-                  onClick={() => {
-                    blurActiveInputOnTouch()
-                    setOnboardingStartMode('demo')
-                  }}
-                >
-                  <span className="onboarding-option-icon">◫</span>
-                  <div>
-                    <b>Explorar com dados de exemplo</b>
-                    <small>Inclui despesas fictícias para visualizar gráficos e relatórios.</small>
-                  </div>
-                </button>
-              </div>
-            </div>
-            <div className="onboarding-footer">
-              <button type="button" className="outline-btn" onClick={() => backupInput.current?.click()}>
-                ↑ Já tenho um backup JSON
-              </button>
-              <button type="submit" className="primary">
-                Entrar no Põe na Conta →
-              </button>
-            </div>
-            <p className="onboarding-privacy-note">🔒 Seus dados ficam salvos apenas neste navegador.</p>
-          </form>
-        </div>
-      )}
-
-      {easterEggOpen && (
-        <div
-          className={`modal-backdrop easter-egg-backdrop ${closingModal === 'easter-egg' ? 'is-closing' : ''}`}
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) closeEasterEgg()
-          }}
-        >
-          {easterEggMessage ? (
-            <section className="modal easter-egg-modal is-revealed" role="dialog" aria-modal="true" aria-labelledby="easter-egg-title">
-              <div className="modal-header">
-                <div>
-                  <span className="eyebrow">SEGREDO DESBLOQUEADO</span>
-                  <h2 id="easter-egg-title">Mensagem secreta</h2>
-                </div>
-                <button type="button" aria-label="Fechar" onClick={closeEasterEgg}>
-                  ×
-                </button>
-              </div>
-              <div className="easter-egg-reveal" role="status">
-                <p>{easterEggMessage}</p>
-              </div>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="cancel-btn"
-                  onClick={() => {
-                    setEasterEggMessage('')
-                    setEasterEggPassword('')
-                    setEasterEggError(false)
-                    setEasterEggShake(false)
-                    window.requestAnimationFrame(() => easterEggInputRef.current?.focus())
-                  }}
-                >
-                  Outra senha
-                </button>
-                <button type="button" className="primary" onClick={closeEasterEgg}>
-                  Fechar
-                </button>
-              </div>
-            </section>
-          ) : (
-            <form
-              noValidate
-              className={`modal easter-egg-modal ${easterEggShake ? 'is-shaking' : ''}`}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="easter-egg-title"
-              onSubmit={submitEasterEgg}
-              onAnimationEnd={event => {
-                if (event.animationName === 'nexus-modal-shake') setEasterEggShake(false)
-              }}
-            >
-              <div className="modal-header">
-                <div>
-                  <span className="eyebrow">SEGREDO DESBLOQUEADO</span>
-                  <h2 id="easter-egg-title">Digite a senha</h2>
-                </div>
-                <button type="button" aria-label="Fechar" onClick={closeEasterEgg}>
-                  ×
-                </button>
-              </div>
-              <label className={easterEggError ? 'easter-egg-field is-invalid' : 'easter-egg-field'}>
-                Senha
-                <input
-                  ref={easterEggInputRef}
-                  type="password"
-                  aria-invalid={easterEggError}
-                  value={easterEggPassword}
-                  onChange={event => {
-                    setEasterEggPassword(event.target.value)
-                    if (easterEggError) setEasterEggError(false)
-                  }}
-                  placeholder="Digite a senha"
-                />
-                {easterEggError && (
-                  <small className="field-error-msg" role="alert">
-                    Senha incorreta. Tente novamente.
-                  </small>
-                )}
-              </label>
-              <div className="modal-actions">
-                <button type="button" className="cancel-btn" onClick={closeEasterEgg}>
-                  Fechar
-                </button>
-                <button className="primary" type="submit">
-                  Confirmar
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-      )}
-
-      {reimbursementEditor && (
-        <div
-          className={`modal-backdrop ${closingModal === 'reimbursement' ? 'is-closing' : ''}`}
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) closeManualReimbursementModal()
-          }}
-        >
-          <form
-            noValidate
-            className={`modal reimbursement-modal ${formShake === 'reimbursement' ? 'is-shaking' : ''}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="reimbursement-modal-title"
-            onSubmit={saveManualReimbursement}
-            onAnimationEnd={event => {
-              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
-            }}
-          >
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">ABATIMENTO DE RACHA ({monthName(month).toUpperCase()})</span>
-                <h2 id="reimbursement-modal-title">
-                  {reimbursementEditor.id ? 'Editar valor avulso' : 'Abater valor avulso'}
-                </h2>
-              </div>
-              <button type="button" aria-label="Fechar abatimento" onClick={closeManualReimbursementModal}>
-                ×
-              </button>
-            </div>
-            <p className="form-help participant-modal-help">
-              Ideal para quando você rachou várias despesas (como corridas de Uber) e recebeu o PIX somado, mas não lembra quais lançamentos específicos dividir. O valor será <b>descontado da sua parte pessoal</b> neste mês.
-            </p>
-            <label className={reimbursementErrors.description ? 'is-invalid' : ''}>
-              Descrição / Motivo
-              <input
-                autoFocus={!isTouchDevice()}
-                enterKeyHint="done"
-                onKeyDown={dismissKeyboardOnEnter}
-                aria-invalid={Boolean(reimbursementErrors.description)}
-                placeholder="Ex.: Racha dos Ubers da semana, PIX do almoço..."
-                value={reimbursementEditor.description}
-                onChange={e => {
-                  clearFieldError(setReimbursementErrors, 'description')
-                  setReimbursementEditor({ ...reimbursementEditor, description: e.target.value })
-                }}
-              />
-              {reimbursementErrors.description && (
-                <small className="field-error-msg" role="alert">
-                  {reimbursementErrors.description}
-                </small>
-              )}
-            </label>
-            <div className="form-row">
-              <label className={reimbursementErrors.amount ? 'is-invalid' : ''}>
-                Valor a abater
-                <div className="money-input-wrap">
-                  <span className="money-prefix" aria-hidden="true">R$</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    enterKeyHint="done"
-                    onKeyDown={dismissKeyboardOnEnter}
-                    aria-invalid={Boolean(reimbursementErrors.amount)}
-                    placeholder="0,00"
-                    value={reimbursementEditor.amount}
-                    onChange={e => {
-                      clearFieldError(setReimbursementErrors, 'amount')
-                      setReimbursementEditor({ ...reimbursementEditor, amount: formatMoneyInput(e.target.value) })
-                    }}
-                  />
-                </div>
-                {reimbursementErrors.amount && (
-                  <small className="field-error-msg" role="alert">
-                    {reimbursementErrors.amount}
-                  </small>
-                )}
-              </label>
-              <label>
-                Quem pagou / racha
-                <select
-                  value={reimbursementEditor.participantId}
-                  onFocus={blurActiveInputOnTouch}
-                  onChange={e => setReimbursementEditor({ ...reimbursementEditor, participantId: e.target.value })}
-                >
-                  <option value={QUICK_THIRD_PARTY_ID}>⚡ {QUICK_THIRD_PARTY_NAME} (sem cadastro)</option>
-                  {(data.participants || []).map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="form-row">
-              <label>
-                Abater da fatura do cartão (opcional)
-                <select
-                  value={reimbursementEditor.cardId}
-                  onFocus={blurActiveInputOnTouch}
-                  onChange={e => setReimbursementEditor({ ...reimbursementEditor, cardId: e.target.value })}
-                >
-                  <option value="">Nenhum (apenas no total do mês)</option>
-                  {data.cards.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.kind === 'store' ? '🛍️' : c.kind === 'borrowed' ? '🤝' : '🏦'} {c.name}
-                    </option>
-                  ))}
-                </select>
-                <small className="form-help">Reduz a &ldquo;Sua parte&rdquo; no resumo desse cartão.</small>
-              </label>
-              <label>
-                Abater de qual categoria? (opcional)
-                <select
-                  value={reimbursementEditor.categoryId}
-                  onFocus={blurActiveInputOnTouch}
-                  onChange={e => setReimbursementEditor({ ...reimbursementEditor, categoryId: e.target.value })}
-                >
-                  <option value="">Nenhuma (apenas no total geral)</option>
-                  {data.categories.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <small className="form-help">Desconta o valor do gráfico dessa categoria.</small>
-              </label>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="cancel-btn" onClick={closeManualReimbursementModal}>
-                Cancelar
-              </button>
-              <button className="primary" type="submit">
-                {reimbursementEditor.id ? 'Salvar alterações' : 'Aplicar abatimento'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {participantSummaryTarget && (() => {
-        const expenseItems = currentExpenses.flatMap(e => {
-          const share = e.allocatedShares.find(s => s.participantId === participantSummaryTarget.id && s.amount > 0)
-          if (!share) return []
-          const shortDate = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(`${e.date}T12:00:00`)).replace('.', '')
-          return [
-            {
-              key: `${e.id}-${e.part}`,
-              expenseId: e.id,
-              part: e.part,
-              description: e.description,
-              detail: `${shortDate} · ${e.installments > 1 ? `Parcela ${e.part}/${e.installments}` : e.method}`,
-              amount: share.amount,
-              paid: Boolean(share.paid),
-              labelForText: e.installments > 1 ? `${e.description} (Parcela ${e.part}/${e.installments})` : e.description,
-            },
-          ]
-        })
-        const manualItems = currentReimbursements
-          .filter(r => r.participantId === participantSummaryTarget.id && r.amount > 0)
-          .map(r => ({
-            key: r.id,
-            expenseId: undefined as string | undefined,
-            part: 1,
-            description: r.description,
-            detail: 'Abatimento avulso no mês',
-            amount: r.amount,
-            paid: false,
-            labelForText: r.description,
-          }))
-        const allSummaryItems = [...expenseItems, ...manualItems]
-        const unpaidSummaryItems = allSummaryItems.filter(item => !item.paid)
-        const paidSummaryTotal = Math.round(allSummaryItems.filter(item => item.paid).reduce((sum, item) => sum + item.amount, 0) * 100) / 100
-        const summaryTotal = Math.round(unpaidSummaryItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100
-        const allExpenseItemsPaid = expenseItems.length > 0 && expenseItems.every(item => item.paid)
-        const itemClauses = unpaidSummaryItems.map(item => `${money(item.amount)} por conta de ${item.labelForText}`).join(', ')
-        const trimmedPix = pixKey.trim()
-        const copyMessage =
-          unpaidSummaryItems.length > 0
-            ? `O valor que você tem que me passar é ${itemClauses}. Totalizando: ${money(summaryTotal)}.${
-                trimmedPix ? ` Essa é minha chave PIX: ${trimmedPix}` : ''
-              }`
-            : ''
-
-        const closeParticipantSummary = () =>
+      <ReimbursementModals
+        closingModal={closingModal}
+        formShake={formShake}
+        onClearShake={() => setFormShake(null)}
+        month={month}
+        participants={data.participants || []}
+        cards={data.cards}
+        categories={data.categories}
+        pixKey={pixKey}
+        currentExpenses={currentExpenses}
+        currentReimbursements={currentReimbursements}
+        reimbursementEditor={reimbursementEditor}
+        setReimbursementEditor={setReimbursementEditor}
+        reimbursementErrors={reimbursementErrors}
+        onClearReimbursementError={field => clearFieldError(setReimbursementErrors, field)}
+        onCloseReimbursement={closeManualReimbursementModal}
+        onSaveReimbursement={saveManualReimbursement}
+        participantSummaryTarget={participantSummaryTarget}
+        onCloseParticipantSummary={() =>
           closeModalWithAnimation('participant-summary', () => setParticipantSummaryTarget(null))
-
-        const handleCopySummary = async () => {
-          if (!copyMessage) return
-          try {
-            await navigator.clipboard.writeText(copyMessage)
-            showToast('Resumo copiado para a área de transferência!')
-          } catch {
-            const textarea = document.createElement('textarea')
-            textarea.value = copyMessage
-            document.body.appendChild(textarea)
-            textarea.select()
-            document.execCommand('copy')
-            document.body.removeChild(textarea)
-            showToast('Resumo copiado para a área de transferência!')
-          }
         }
+        onToggleParticipantSharePaid={toggleParticipantSharePaid}
+        onSetAllParticipantSharesPaidInMonth={setAllParticipantSharesPaidInMonth}
+        onNavigateToSettings={() => setView('Ajustes')}
+        onToast={showToast}
+        advanceEditor={advanceEditor}
+        setAdvanceEditor={setAdvanceEditor}
+        advanceError={advanceError}
+        setAdvanceError={setAdvanceError}
+        onCloseAdvance={closeAdvanceModal}
+        onConfirmAdvance={confirmAdvanceInstallments}
+        computeAdvanceDefaultAmount={computeAdvanceDefaultAmount}
+      />
 
-        return (
-          <div
-            className={`modal-backdrop ${closingModal === 'participant-summary' ? 'is-closing' : ''}`}
-            onMouseDown={event => {
-              if (event.target === event.currentTarget) closeParticipantSummary()
-            }}
-          >
-            <section
-              className="modal participant-summary-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="participant-summary-title"
-            >
-              <div className="modal-header">
-                <div>
-                  <span className="eyebrow">RESUMO DE REEMBOLSO ({monthName(month).toUpperCase()})</span>
-                  <h2 id="participant-summary-title">{participantSummaryTarget.name}</h2>
-                </div>
-                <button type="button" aria-label="Fechar resumo" onClick={closeParticipantSummary}>
-                  ×
-                </button>
-              </div>
-              <div className="participant-summary-toolbar">
-                <span className="participant-summary-hint">
-                  Toque nas despesas que {participantSummaryTarget.name} já pagou para abatê-las da cobrança:
-                </span>
-                {expenseItems.length > 1 && (
-                  <button
-                    type="button"
-                    className="text-btn participant-mark-all-btn"
-                    onClick={() => setAllParticipantSharesPaidInMonth(participantSummaryTarget.id, !allExpenseItemsPaid)}
-                  >
-                    {allExpenseItemsPaid ? 'Desmarcar todas' : '✓ Marcar todas como pagas'}
-                  </button>
-                )}
-              </div>
-              <div className="participant-summary-items">
-                {allSummaryItems.map(item => (
-                  <div className={`participant-summary-row ${item.paid ? 'is-paid' : ''}`} key={item.key}>
-                    <div className="participant-summary-row-info">
-                      <b>{item.description}</b>
-                      <small>{item.detail}</small>
-                    </div>
-                    <div className="participant-summary-row-right">
-                      <strong className={item.paid ? 'is-paid-amount' : ''}>{money(item.amount)}</strong>
-                      {item.expenseId && (
-                        <button
-                          type="button"
-                          className={`participant-paid-toggle ${item.paid ? 'is-paid' : ''}`}
-                          aria-pressed={item.paid}
-                          onClick={() => toggleParticipantSharePaid(item.expenseId!, item.part, participantSummaryTarget.id)}
-                          title={item.paid ? 'Desmarcar como pago' : 'Marcar esta despesa como paga'}
-                        >
-                          {item.paid ? '✓ Pago' : 'Marcar pago'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {paidSummaryTotal > 0 && (
-                  <div className="participant-summary-paid-sub">
-                    <span>Já pago neste mês</span>
-                    <b>✓ {money(paidSummaryTotal)}</b>
-                  </div>
-                )}
-                <div className="participant-summary-total">
-                  <span>{paidSummaryTotal > 0 ? 'Falta receber neste mês' : 'Total a receber neste mês'}</span>
-                  <b>{money(summaryTotal)}</b>
-                </div>
-              </div>
-              {copyMessage ? (
-                <div className="participant-summary-preview-box">
-                  <span className="participant-summary-preview-label">
-                    Mensagem que será copiada ({unpaidSummaryItems.length} {unpaidSummaryItems.length === 1 ? 'item pendente' : 'itens pendentes'}):
-                  </span>
-                  <p>{copyMessage}</p>
-                  {!trimmedPix && (
-                    <button
-                      type="button"
-                      className="text-btn participant-summary-pix-link"
-                      onClick={() => {
-                        closeParticipantSummary()
-                        setView('Ajustes')
-                      }}
-                    >
-                      ＋ Cadastrar minha chave PIX nas Preferências para incluir no texto →
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="participant-summary-settled-box" role="status">
-                  <span>🎉</span>
-                  <div>
-                    <b>Tudo quitado em {monthName(month)}!</b>
-                    <p>Todas as despesas de {participantSummaryTarget.name} neste mês foram marcadas como pagas. Seus gastos pessoais permanecem intactos.</p>
-                  </div>
-                </div>
-              )}
-              <div className="modal-actions">
-                <button type="button" className="cancel-btn" onClick={closeParticipantSummary}>
-                  Fechar
-                </button>
-                {copyMessage && (
-                  <button type="button" className="primary" onClick={handleCopySummary}>
-                    Copiar resumo
-                  </button>
-                )}
-              </div>
-            </section>
-          </div>
-        )
-      })()}
 
-      {advanceEditor && (() => {
-        const { occurrence: occ, countToAdvance, customAmount } = advanceEditor
-        const remaining = occ.installments - occ.part
-        const defaultAmt = computeAdvanceDefaultAmount(occ, countToAdvance)
-        const parsedCustom = parseMoneyInput(customAmount)
-        const validCustom = Number.isFinite(parsedCustom) && parsedCustom > 0 ? parsedCustom : 0
-        const discountSavings = Math.max(0, Math.round((defaultAmt - validCustom) * 100) / 100)
-        const firstFreedMonth = shiftMonthKey(occ.month, remaining - countToAdvance + 1)
-        const lastFreedMonth = shiftMonthKey(occ.month, remaining)
-
-        return (
-          <div
-            className={`modal-backdrop ${closingModal === 'advance' ? 'is-closing' : ''}`}
-            onMouseDown={event => {
-              if (event.target === event.currentTarget) closeAdvanceModal()
-            }}
-          >
-            <form
-              noValidate
-              className={`modal advance-modal ${formShake === 'advance' ? 'is-shaking' : ''}`}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="advance-modal-title"
-              onSubmit={confirmAdvanceInstallments}
-              onAnimationEnd={event => {
-                if (event.animationName === 'nexus-modal-shake') setFormShake(null)
-              }}
-            >
-              <div className="modal-header">
-                <div>
-                  <span className="eyebrow">ADIANTAR PARCELAS FUTURAS</span>
-                  <h2 id="advance-modal-title">{occ.description}</h2>
-                </div>
-                <button type="button" aria-label="Fechar adiantamento" onClick={closeAdvanceModal}>
-                  ×
-                </button>
-              </div>
-              <p className="form-help participant-modal-help">
-                Você está na <b>Parcela {occ.part} de {occ.installments}</b> ({monthName(occ.month)}). Ao adiantar, as parcelas escolhidas saem das faturas futuras e entram como pagamento único em <b>{monthName(occ.month)}</b>, mantendo os meses anteriores intactos.
-              </p>
-              <div className="advance-count-selector">
-                <span className="first-month-selector-label">
-                  Quantas parcelas futuras deseja adiantar?
-                  <small>Restam {remaining} {remaining === 1 ? 'parcela futura' : 'parcelas futuras'} após {shortMonthYear(occ.month)}</small>
-                </span>
-                <div className="advance-count-pills" role="radiogroup" aria-label="Quantidade de parcelas para adiantar">
-                  {Array.from({ length: remaining }, (_, i) => i + 1).map(num => {
-                    const isSelected = countToAdvance === num
-                    const amt = computeAdvanceDefaultAmount(occ, num)
-                    return (
-                      <button
-                        key={num}
-                        type="button"
-                        role="radio"
-                        aria-checked={isSelected}
-                        className={`first-month-pill ${isSelected ? 'is-selected' : ''}`}
-                        onClick={() => {
-                          setAdvanceError('')
-                          setAdvanceEditor({
-                            ...advanceEditor,
-                            countToAdvance: num,
-                            customAmount: formatMoneyInput(amt),
-                          })
-                        }}
-                      >
-                        <b>{num === remaining ? `Todas (${num})` : `${num} ${num === 1 ? 'parcela' : 'parcelas'}`}</b>
-                        <small>{money(amt)}</small>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-              <label className={advanceError ? 'is-invalid' : ''}>
-                Valor cobrado no adiantamento (com desconto, se houver)
-                <div className="money-input-wrap">
-                  <span className="money-prefix" aria-hidden="true">R$</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    enterKeyHint="done"
-                    onKeyDown={dismissKeyboardOnEnter}
-                    aria-invalid={Boolean(advanceError)}
-                    placeholder="0,00"
-                    value={customAmount}
-                    onChange={e => {
-                      setAdvanceError('')
-                      setAdvanceEditor({ ...advanceEditor, customAmount: formatMoneyInput(e.target.value) })
-                    }}
-                  />
-                </div>
-                {advanceError ? (
-                  <small className="field-error-msg" role="alert">
-                    {advanceError}
-                  </small>
-                ) : (
-                  <small className="form-help">
-                    Valor original das {countToAdvance} {countToAdvance === 1 ? 'parcela' : 'parcelas'}: <b>{money(defaultAmt)}</b>.
-                    {discountSavings > 0 ? ` Economia com desconto: ${money(discountSavings)}!` : ' Se o banco deu desconto ao antecipar, digite o valor final acima.'}
-                  </small>
-                )}
-              </label>
-              <div className="billing-preview">
-                <span>⚡</span>
-                <div>
-                  Faturas liberadas:{' '}
-                  <b>
-                    {countToAdvance === 1
-                      ? monthName(lastFreedMonth)
-                      : `${shortMonthYear(firstFreedMonth)} até ${shortMonthYear(lastFreedMonth)}`}
-                  </b>
-                  . O lançamento original passará a ter <b>{occ.installments - countToAdvance}x</b> e o adiantamento de <b>{money(validCustom || defaultAmt)}</b> cairá em <b>{monthName(occ.month)}</b>.
-                </div>
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="cancel-btn" onClick={closeAdvanceModal}>
-                  Cancelar
-                </button>
-                <button className="primary" type="submit">
-                  Confirmar adiantamento
-                </button>
-              </div>
-            </form>
-          </div>
-        )
-      })()}
-
-      {pwaGuideOpen && (
-        <div
-          className={`modal-backdrop ${closingModal === 'pwa-guide' ? 'is-closing' : ''}`}
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) closePwaGuideModal()
-          }}
-        >
-          <section className="modal pwa-guide-modal" role="dialog" aria-modal="true" aria-labelledby="pwa-guide-title">
-            <div className="modal-header">
-              <div>
-                <span className="eyebrow">APLICATIVO NA TELA INICIAL</span>
-                <h2 id="pwa-guide-title">Como instalar o Põe na Conta</h2>
-              </div>
-              <button type="button" aria-label="Fechar instruções" onClick={closePwaGuideModal}>
-                ×
-              </button>
-            </div>
-            <p className="confirm-dialog-description">
-              Ao adicionar o ícone à tela inicial, o Põe na Conta abre em tela cheia (sem barra de endereço) e funciona 100% offline.
-            </p>
-            <div className="pwa-guide-steps">
-              <div className="pwa-guide-card">
-                <b>No iPhone / iPad (Safari)</b>
-                <ol>
-                  <li>
-                    Toque no ícone <b>Compartilhar</b> (quadrado com seta para cima <b>↑</b>) na barra do Safari.
-                  </li>
-                  <li>
-                    Role a lista para baixo e toque em <b>Adicionar à Tela de Início</b>.
-                  </li>
-                  <li>
-                    Confirme tocando em <b>Adicionar</b> no canto superior direito.
-                  </li>
-                </ol>
-              </div>
-              <div className="pwa-guide-card">
-                <b>No Android (Chrome / Edge / Samsung)</b>
-                <ol>
-                  <li>
-                    Toque no menu de três pontos (<b>⋮</b>) no canto do navegador.
-                  </li>
-                  <li>
-                    Selecione <b>Instalar aplicativo</b> ou <b>Adicionar à tela inicial</b>.
-                  </li>
-                  <li>Confirme a instalação para criar o atalho em tela cheia.</li>
-                </ol>
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="primary" onClick={closePwaGuideModal}>
-                Entendi
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
 
       <InvestmentModals
         closingModal={closingModal}

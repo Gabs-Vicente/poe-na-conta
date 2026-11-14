@@ -32,9 +32,8 @@ type SettingsViewProps = {
   onOpenParticipant: (participant?: Participant) => void
   onRemoveParticipant: (id: string) => void
   onDownloadBackup: () => void
+  onShareBackup: () => void
   onTriggerBackupImport: () => void
-  onOpenTransferSend: () => void
-  onOpenTransferScan: () => void
   onDownloadCsv: () => void
   onOpenResetDataModal: () => void
 }
@@ -68,9 +67,8 @@ export function SettingsView({
   onOpenParticipant,
   onRemoveParticipant,
   onDownloadBackup,
+  onShareBackup,
   onTriggerBackupImport,
-  onOpenTransferSend,
-  onOpenTransferScan,
   onDownloadCsv,
   onOpenResetDataModal,
 }: SettingsViewProps) {
@@ -343,14 +341,11 @@ export function SettingsView({
           <button className="outline-btn" onClick={onDownloadBackup}>
             Baixar backup JSON
           </button>
+          <button type="button" className="outline-btn" onClick={onShareBackup}>
+            📤 Compartilhar .json
+          </button>
           <button className="outline-btn" onClick={onTriggerBackupImport}>
             Importar backup
-          </button>
-          <button type="button" className="outline-btn" onClick={onOpenTransferSend}>
-            📱 Enviar por QR Code
-          </button>
-          <button type="button" className="outline-btn" onClick={onOpenTransferScan}>
-            📷 Ler QR Code
           </button>
           <button className="outline-btn" onClick={onDownloadCsv}>
             📊 Exportar planilha do mês

@@ -1206,32 +1206,6 @@ footer{color:#89877f}
   .hover-expand-toggle{display:block}
 }
 
-/* Transferência por QR Code / Link */
-.transfer-modal{max-width:480px}
-.qr-preview-box{display:flex;justify-content:center;align-items:center;margin:14px auto;padding:14px;width:fit-content;background:#ffffff;border-radius:16px;border:1px solid #e1e5da;box-shadow:0 6px 20px rgba(0,0,0,.06)}
-.qr-preview-box img{display:block;border-radius:8px}
-
-.qr-scanner-frame{position:relative;width:100%;aspect-ratio:4/3;max-height:300px;border-radius:14px;overflow:hidden;background:#10120e;margin:12px 0;display:grid;place-items:center}
-.qr-scanner-frame video{width:100%;height:100%;object-fit:cover;display:block}
-.qr-scanner-reticle{position:absolute;width:62%;aspect-ratio:1/1;max-width:210px;border:2px solid rgba(143,197,163,.9);border-radius:18px;box-shadow:0 0 0 9999px rgba(0,0,0,.38);pointer-events:none}
-.qr-scanner-loading{position:absolute;color:#eceae1;font-size:12px;font-weight:600;background:rgba(16,18,14,.72);padding:6px 12px;border-radius:999px}
-
-.transfer-alert{padding:11px 13px;border-radius:10px;border:1px solid #eadcc2;background:#fdf8ee;color:#6e5325;font-size:12px;line-height:1.45;margin:10px 0}
-.transfer-alert.is-error{border-color:#e9c7c7;background:#fdf1f1;color:#9f2f2f}
-.app-shell[data-theme="dark"] .transfer-alert{background:#292318;border-color:#4b3e26;color:#e3caa0}
-.app-shell[data-theme="dark"] .transfer-alert.is-error{background:#341e1e;border-color:#5a3232;color:#f1a1a1}
-
-.transfer-checkbox{display:flex!important;align-items:center;gap:8px;font-size:12px!important;margin:10px 0 4px!important;cursor:pointer}
-.transfer-checkbox input{width:16px!important;height:16px!important;margin:0!important;flex:0 0 auto}
-
-.transfer-actions-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-.transfer-actions-row .outline-btn{flex:1 1 160px;justify-content:center}
-
-.transfer-paste-label{margin-top:12px}
-.transfer-paste-row{display:flex;gap:8px;align-items:center;margin-top:6px}
-.transfer-paste-row input{margin-top:0!important;flex:1}
-.transfer-paste-row .outline-btn{height:38px;white-space:nowrap}
-
 /* Correções mobile: modais acima da barra inferior, Relatórios sem overflow, Recorrências e tabela de Investimentos */
 .modal-backdrop{z-index:30}
 .recurrence-count{white-space:nowrap;flex-shrink:0}

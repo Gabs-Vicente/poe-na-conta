@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildInstallmentRelief, buildOccurrences, cardDueMonth, createBackup, csvCell, expenseFirstMonth, formatMoneyInput, normalizeData, normalizeDateInput, occurrencePersonalValue, parseBackup, parseBackupFile, parseMoneyInput, QUICK_THIRD_PARTY_ID, quickSplitThirdPartyAmount, readStoredData, seed, splitAmountAmongParticipantsOnly, splitAmountEquallyWithMe, validateData } from '../src/finance.ts'
-import { decodeBackupTransferText, encodeBackupTransferToken, extractBackupTokenFromText } from '../src/utils/backupTransfer.ts'
 
 const card = { id: 'card', name: 'Principal', closingDay: 25, dueDay: 5, closingDayRule: 'after' }
 const cardClosing30 = { id: 'card30', name: 'Cartão dia 30', closingDay: 30, dueDay: 10, closingDayRule: 'after' }
@@ -324,19 +323,5 @@ test('preserva investimentos, movimentacoes e metas de reserva no backup', () =>
   assert.equal(parsed?.investments?.[0].currentAmount, 3250)
   assert.equal(parsed?.investments?.[0].entries?.length, 2)
   assert.equal(parsed?.investments?.[0].entries?.[1].type, 'atualizacao')
-})
-
-test('compacta e restaura backup via token e URL #backup= (gzip)', async () => {
-  const backupJson = createBackup(seed)
-  const token = await encodeBackupTransferToken(backupJson)
-  assert.ok(token.startsWith('gz:') || token.startsWith('raw:'))
-
-  const url = `https://example.github.io/poe-na-conta/#backup=${encodeURIComponent(token)}`
-  assert.equal(extractBackupTokenFromText(url), token)
-
-  const decodedJson = await decodeBackupTransferText(url)
-  assert.ok(decodedJson)
-  const parsed = parseBackupFile(decodedJson)
-  assert.equal(parsed?.data.expenses.length, seed.expenses.length)
 })
 

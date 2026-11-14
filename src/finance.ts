@@ -45,6 +45,40 @@ export type ManualReimbursement = {
   cardId?: string
   categoryId?: string
 }
+export type InvestmentType = 'reserva' | 'renda-fixa' | 'tesouro' | 'fiis' | 'acoes' | 'cripto' | 'outros'
+export type InvestmentEntryType = 'aporte' | 'resgate' | 'atualizacao'
+export type InvestmentEntry = {
+  id: string
+  date: string
+  type: InvestmentEntryType
+  amount: number
+  note?: string
+}
+export type Investment = {
+  id: string
+  name: string
+  type: InvestmentType
+  institution?: string
+  investedAmount: number
+  currentAmount: number
+  goalId?: string
+  entries?: InvestmentEntry[]
+}
+export type ReserveGoal = {
+  id: string
+  name: string
+  targetAmount: number
+  color?: string
+}
+export const INVESTMENT_TYPE_META: Record<InvestmentType, { label: string; color: string; shortLabel: string }> = {
+  reserva: { label: 'Reserva / Caixinha', shortLabel: 'Reserva', color: '#4d9b6f' },
+  'renda-fixa': { label: 'Renda Fixa (CDB / LCI / LCA)', shortLabel: 'Renda Fixa', color: '#5c85b8' },
+  tesouro: { label: 'Tesouro Direto', shortLabel: 'Tesouro', color: '#7a74b8' },
+  fiis: { label: 'Fundos Imobiliários (FIIs)', shortLabel: 'FIIs', color: '#c48f45' },
+  acoes: { label: 'Ações / ETFs', shortLabel: 'Ações/ETFs', color: '#c86558' },
+  cripto: { label: 'Criptomoedas', shortLabel: 'Cripto', color: '#b56e9c' },
+  outros: { label: 'Outros investimentos', shortLabel: 'Outros', color: '#7b847d' },
+}
 export type Data = {
   categories: Category[]
   cards: Card[]
@@ -52,11 +86,13 @@ export type Data = {
   expenses: Expense[]
   recurrences?: Recurrence[]
   reimbursements?: ManualReimbursement[]
+  investments?: Investment[]
+  reserveGoals?: ReserveGoal[]
 }
 export type BackupPreferences = {
   monthlyLimit: string
   limitNoticePercent: string
-  defaultView: 'Visão geral' | 'Lançamentos' | 'Relatórios' | 'Recorrências' | 'Ajustes'
+  defaultView: 'Visão geral' | 'Lançamentos' | 'Relatórios' | 'Investimentos' | 'Recorrências' | 'Ajustes'
   theme: 'light' | 'dark'
   profileName?: string
   profilePhoto?: string
@@ -266,6 +302,8 @@ export const isDate = (value: unknown): value is string => {
   return !Number.isNaN(parsed.getTime()) && dateKey(parsed) === value
 }
 const methods: Method[] = ['PIX', 'Débito', 'Dinheiro', 'Crédito à vista', 'Crédito parcelado']
+const investmentTypes: InvestmentType[] = ['reserva', 'renda-fixa', 'tesouro', 'fiis', 'acoes', 'cripto', 'outros']
+const investmentEntryTypes: InvestmentEntryType[] = ['aporte', 'resgate', 'atualizacao']
 
 const coerceInputData = (value: unknown): unknown => {
   if (!isRecord(value) || !Array.isArray(value.categories) || !Array.isArray(value.cards) || !Array.isArray(value.expenses)) return value
@@ -311,6 +349,16 @@ export const validateData = (value: unknown): value is Data => {
   if (!Array.isArray(recurrences) || !recurrences.every(item => isRecord(item) && isText(item.id) && isText(item.description) && isFiniteNumber(item.amount) && item.amount > 0 && isText(item.category) && methods.includes(item.method as Method) && isDay(item.day) && typeof item.active === 'boolean' && (item.cardId === undefined || isText(item.cardId)) && Array.isArray(item.generatedMonths) && item.generatedMonths.every(isText) && Array.isArray(item.skippedMonths) && item.skippedMonths.every(isText))) return false
   const reimbursements = value.reimbursements === undefined ? [] : value.reimbursements
   if (!Array.isArray(reimbursements) || !reimbursements.every(item => isRecord(item) && isText(item.id) && isText(item.description) && isFiniteNumber(item.amount) && item.amount > 0 && isText(item.month) && /^\d{4}-\d{2}$/.test(item.month) && isText(item.participantId) && (item.cardId === undefined || isText(item.cardId)) && (item.categoryId === undefined || isText(item.categoryId)))) return false
+  const reserveGoals = value.reserveGoals === undefined ? [] : value.reserveGoals
+  if (!Array.isArray(reserveGoals) || !reserveGoals.every(goal => isRecord(goal) && isText(goal.id) && isText(goal.name) && isFiniteNumber(goal.targetAmount) && goal.targetAmount > 0 && (goal.color === undefined || isText(goal.color)))) return false
+  const investments = value.investments === undefined ? [] : value.investments
+  if (!Array.isArray(investments) || !investments.every(inv => {
+    if (!isRecord(inv) || !isText(inv.id) || !isText(inv.name) || !investmentTypes.includes(inv.type as InvestmentType) || !isFiniteNumber(inv.investedAmount) || inv.investedAmount < 0 || !isFiniteNumber(inv.currentAmount) || inv.currentAmount < 0) return false
+    if (inv.institution !== undefined && !isText(inv.institution)) return false
+    if (inv.goalId !== undefined && !isText(inv.goalId)) return false
+    if (inv.entries !== undefined && (!Array.isArray(inv.entries) || !inv.entries.every(entry => isRecord(entry) && isText(entry.id) && isDate(entry.date) && investmentEntryTypes.includes(entry.type as InvestmentEntryType) && isFiniteNumber(entry.amount) && entry.amount >= 0 && (entry.note === undefined || isText(entry.note))))) return false
+    return true
+  })) return false
   return value.expenses.every(item => {
     if (!isRecord(item) || !isText(item.id) || !isText(item.description) || !isFiniteNumber(item.amount) || item.amount <= 0 || !isDate(item.date) || !isText(item.category) || !methods.includes(item.method as Method) || !Number.isInteger(item.installments) || Number(item.installments) < 1 || Number(item.installments) > 60 || !isText(item.firstMonth) || !/^\d{4}-\d{2}$/.test(item.firstMonth)) return false
     if (item.cardId !== undefined && !isText(item.cardId)) return false
@@ -340,7 +388,7 @@ export const normalizeData = (rawValue: unknown): Data | null => {
     const expectedFirstMonth = cardDueMonth(expense.date, card, expense.afterClosing)
     return expense.firstMonth === expectedFirstMonth ? expense : { ...expense, firstMonth: expectedFirstMonth }
   })
-  return { ...value, categories, cards, expenses, participants: value.participants || [], recurrences: value.recurrences || [] } as Data
+  return { ...value, categories, cards, expenses, participants: value.participants || [], recurrences: value.recurrences || [], investments: value.investments || [], reserveGoals: value.reserveGoals || [] } as Data
 }
 
 export type StoredData = { data: Data; warning?: string }
@@ -372,7 +420,7 @@ export const parseBackupFile = (raw: string): BackupPayload | null => {
     if (!data) return null
     if (backup.version === 1) return { data }
     const preferences = backup.preferences
-    const views = ['Visão geral', 'Lançamentos', 'Relatórios', 'Recorrências', 'Ajustes']
+    const views = ['Visão geral', 'Lançamentos', 'Relatórios', 'Investimentos', 'Recorrências', 'Ajustes']
     if (!isRecord(preferences) || !isText(preferences.monthlyLimit) || (preferences.monthlyLimit !== '' && (!Number.isFinite(Number(preferences.monthlyLimit)) || Number(preferences.monthlyLimit) < 0)) || !isText(preferences.limitNoticePercent) || !Number.isInteger(Number(preferences.limitNoticePercent)) || Number(preferences.limitNoticePercent) < 1 || Number(preferences.limitNoticePercent) > 100 || !views.includes(String(preferences.defaultView)) || (preferences.theme !== 'light' && preferences.theme !== 'dark') || (preferences.profileName !== undefined && !isText(preferences.profileName)) || (preferences.pixKey !== undefined && !isText(preferences.pixKey)) || (preferences.profilePhoto !== undefined && (!isText(preferences.profilePhoto) || preferences.profilePhoto.length > 3_000_000 || (preferences.profilePhoto !== '' && !/^data:image\/(png|jpeg|webp);base64,/.test(preferences.profilePhoto))))) return null
     return {
       data,

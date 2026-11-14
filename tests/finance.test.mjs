@@ -67,7 +67,7 @@ test('divide reembolso entre parcelas sem superar a parte correspondente', () =>
 
 test('valida dados e recupera apenas com envelope de backup suportado', () => {
   assert.equal(validateData(seed), true)
-  assert.deepEqual(parseBackup(createBackup(seed)), { ...seed, recurrences: [] })
+  assert.deepEqual(parseBackup(createBackup(seed)), { ...seed, recurrences: [], investments: [], reserveGoals: [] })
   assert.equal(parseBackup(JSON.stringify({ format: 'nexus-finance-backup', version: 2, data: seed })), null)
   const loaded = readStoredData('{invalid json')
   assert.ok(loaded.warning)
@@ -268,5 +268,60 @@ test('preserva parcelas pagas por participantes sem alterar a parte pessoal', ()
 
   const parsed = parseBackup(createBackup({ ...seed, expenses, recurrences: [] }))
   assert.deepEqual(parsed?.expenses[0].shares?.[0].paidInstallments, [1])
+})
+
+test('preserva investimentos, movimentacoes e metas de reserva no backup', () => {
+  const reserveGoals = [
+    {
+      id: 'goal-1',
+      name: 'Reserva de Emergência',
+      targetAmount: 15000,
+      color: '#3e8f60',
+    },
+  ]
+  const investments = [
+    {
+      id: 'inv-1',
+      name: 'Caixinha Nubank',
+      type: 'renda-fixa',
+      institution: 'Nubank',
+      currentAmount: 3250,
+      investedAmount: 3000,
+      goalId: 'goal-1',
+      entries: [
+        {
+          id: 'entry-1',
+          type: 'aporte',
+          amount: 3000,
+          date: '2026-10-10',
+          note: 'Aporte inicial',
+        },
+        {
+          id: 'entry-2',
+          type: 'atualizacao',
+          amount: 3250,
+          date: '2026-11-10',
+          note: 'Rendimento mensal',
+        },
+      ],
+    },
+  ]
+
+  const parsed = parseBackup(
+    createBackup({
+      ...seed,
+      investments,
+      reserveGoals,
+    }),
+  )
+
+  assert.equal(parsed?.reserveGoals?.length, 1)
+  assert.equal(parsed?.reserveGoals?.[0].name, 'Reserva de Emergência')
+  assert.equal(parsed?.reserveGoals?.[0].targetAmount, 15000)
+  assert.equal(parsed?.investments?.length, 1)
+  assert.equal(parsed?.investments?.[0].goalId, 'goal-1')
+  assert.equal(parsed?.investments?.[0].currentAmount, 3250)
+  assert.equal(parsed?.investments?.[0].entries?.length, 2)
+  assert.equal(parsed?.investments?.[0].entries?.[1].type, 'atualizacao')
 })
 

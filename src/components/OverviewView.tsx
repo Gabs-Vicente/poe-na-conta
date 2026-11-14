@@ -1,6 +1,18 @@
 import { useState } from 'react'
 import type React from 'react'
-import { QUICK_THIRD_PARTY_ID, QUICK_THIRD_PARTY_NAME, type Card, type Category, type Data, type InstallmentReliefSummary, type ManualReimbursement, type Occurrence, type Participant } from '../finance'
+import {
+  INVESTMENT_TYPE_META,
+  QUICK_THIRD_PARTY_ID,
+  QUICK_THIRD_PARTY_NAME,
+  type Card,
+  type Category,
+  type Data,
+  type InstallmentReliefSummary,
+  type InvestmentType,
+  type ManualReimbursement,
+  type Occurrence,
+  type Participant,
+} from '../finance'
 import { categorySymbol, donutSlice, money, monthName, shortMonthYear, type MainView } from '../utils/format'
 
 type PieSlice = {
@@ -29,6 +41,10 @@ type ParticipantReimbursementItem = {
 type OverviewViewProps = {
   data: Data
   theme: 'light' | 'dark'
+  overviewMode: 'expenses' | 'investments'
+  onOverviewModeChange: (mode: 'expenses' | 'investments') => void
+  onOpenInvestmentModal: () => void
+  onOpenGoalModal: () => void
   month: string
   previousMonth: string
   total: number
@@ -71,6 +87,10 @@ type OverviewViewProps = {
 export function OverviewView({
   data,
   theme,
+  overviewMode,
+  onOverviewModeChange,
+  onOpenInvestmentModal,
+  onOpenGoalModal,
   month,
   previousMonth,
   total,
@@ -104,6 +124,7 @@ export function OverviewView({
   onOpenManualReimbursement,
   onDeleteManualReimbursement,
   onOpenParticipantSummary,
+  onNavigateView,
   personalValue,
   owedBy,
 }: OverviewViewProps) {
@@ -130,8 +151,261 @@ export function OverviewView({
 
   const totalCardsInvoice = cardSummaries.reduce((sum, item) => sum + item.invoiceTotal, 0)
 
+  const investments = data.investments || []
+  const reserveGoals = data.reserveGoals || []
+  const invTotalCurrent = Math.round(investments.reduce((sum, inv) => sum + inv.currentAmount, 0) * 100) / 100
+  const invTotalInvested = Math.round(investments.reduce((sum, inv) => sum + inv.investedAmount, 0) * 100) / 100
+  const invTotalYield = Math.round((invTotalCurrent - invTotalInvested) * 100) / 100
+  const invYieldPct = invTotalInvested > 0 ? (invTotalYield / invTotalInvested) * 100 : null
+  const invMonthDeposits = Math.round(
+    investments.reduce(
+      (sum, inv) => sum + (inv.entries || []).filter(e => e.type === 'aporte' && e.date.startsWith(month)).reduce((s, e) => s + e.amount, 0),
+      0,
+    ) * 100,
+  ) / 100
+
+  const invByType = (Object.keys(INVESTMENT_TYPE_META) as InvestmentType[])
+    .map(type => ({
+      type,
+      ...INVESTMENT_TYPE_META[type],
+      total: Math.round(investments.filter(inv => inv.type === type).reduce((sum, inv) => sum + inv.currentAmount, 0) * 100) / 100,
+    }))
+    .filter(item => item.total > 0)
+    .sort((a, b) => b.total - a.total)
+
+  const invPieTotal = invByType.reduce((sum, item) => sum + item.total, 0)
+  const invPieSlices = invByType.reduce<Array<{ item: typeof invByType[number]; start: number; end: number; percentage: number }>>((slices, item) => {
+    const start = slices.at(-1)?.end || 0
+    const end = start + (invPieTotal > 0 ? (item.total / invPieTotal) * 360 : 0)
+    return [...slices, { item, start, end, percentage: invPieTotal > 0 ? Math.round((item.total / invPieTotal) * 100) : 0 }]
+  }, [])
+
   return (
     <>
+      <div className="overview-mode-bar">
+        <div className="overview-mode-switch" role="tablist" aria-label="Modo da visão geral">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={overviewMode === 'expenses'}
+            className={overviewMode === 'expenses' ? 'is-active' : ''}
+            onClick={() => onOverviewModeChange('expenses')}
+          >
+            Despesas
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={overviewMode === 'investments'}
+            className={overviewMode === 'investments' ? 'is-active' : ''}
+            onClick={() => onOverviewModeChange('investments')}
+          >
+            Investimentos
+          </button>
+        </div>
+        <button
+          type="button"
+          className="text-btn overview-inv-goto-btn"
+          onClick={() => onNavigateView(overviewMode === 'investments' ? 'Investimentos' : 'Lançamentos')}
+        >
+          {overviewMode === 'investments' ? 'Ver investimentos →' : 'Ver lançamentos →'}
+        </button>
+      </div>
+
+      {overviewMode === 'investments' ? (
+        <>
+          <section className="stats health-stats">
+            <article className="stat-card balance-card">
+              <div className="stat-top">
+                <span>Patrimônio investido</span>
+                <span className="stat-symbol">↗</span>
+              </div>
+              <strong>{money(invTotalCurrent)}</strong>
+              <div className="stat-foot">
+                {investments.length === 1 ? '1 ativo cadastrado' : `${investments.length} ativos cadastrados`}
+              </div>
+            </article>
+            <article className="stat-card">
+              <div className="stat-top">
+                <span>Total aportado</span>
+                <span className="stat-symbol muted">＋</span>
+              </div>
+              <strong>{money(invTotalInvested)}</strong>
+              <div className="stat-foot">Valor líquido aplicado por você</div>
+            </article>
+            <article className="stat-card">
+              <div className="stat-top">
+                <span>Rendimento acumulado</span>
+                <span className={`stat-symbol ${invTotalYield >= 0 ? '' : 'orange'}`}>{invTotalYield >= 0 ? '▲' : '▼'}</span>
+              </div>
+              <strong>
+                {invTotalYield >= 0 ? '+' : '−'} {money(Math.abs(invTotalYield))}
+              </strong>
+              <div className="stat-foot">
+                {invYieldPct === null ? 'Sem aportes registrados' : `${invYieldPct >= 0 ? '+' : ''}${invYieldPct.toFixed(1)}% de retorno`}
+              </div>
+            </article>
+            <article className="stat-card">
+              <div className="stat-top">
+                <span>Aportado em {monthName(month).split(' ')[0]}</span>
+                <span className="stat-symbol muted">◷</span>
+              </div>
+              <strong>{money(invMonthDeposits)}</strong>
+              <div className="stat-foot">Depósitos feitos no mês selecionado</div>
+            </article>
+          </section>
+
+          <section className="health-grid">
+            <div className="panel category-panel">
+              <div className="panel-head">
+                <div>
+                  <h2>Distribuição da carteira</h2>
+                  <p>Resumo por classe de investimento</p>
+                </div>
+                <span className="calendar-icon">◔</span>
+              </div>
+              {invByType.length > 0 ? (
+                <div className="pie-layout">
+                  <div className="pie-chart">
+                    <svg className="pie-svg" viewBox="0 0 100 100" role="img" aria-label="Distribuição de investimentos">
+                      <circle cx="50" cy="50" r="37" fill="none" stroke="#e8eee9" strokeWidth="18" />
+                      {invPieSlices.length === 1 ? (
+                        <circle
+                          className="pie-slice"
+                          cx="50"
+                          cy="50"
+                          r="37"
+                          fill="none"
+                          stroke={invPieSlices[0].item.color}
+                          strokeWidth="18"
+                          style={{ stroke: invPieSlices[0].item.color, strokeWidth: 18 }}
+                        />
+                      ) : (
+                        invPieSlices.map(slice => (
+                          <path key={slice.item.type} className="pie-slice" d={donutSlice(slice.start, slice.end)} fill={slice.item.color} />
+                        ))
+                      )}
+                    </svg>
+                    <div className="pie-center">
+                      <b>{money(invPieTotal)}</b>
+                      <small>Patrimônio</small>
+                    </div>
+                  </div>
+                  <div className="pie-legend">
+                    {invPieSlices.map(({ item, percentage }) => (
+                      <div key={item.type}>
+                        <span>
+                          <i style={{ background: item.color }} />
+                          {item.shortLabel} ({percentage}%)
+                        </span>
+                        <b>{money(item.total)}</b>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="empty compact">
+                  Nenhum investimento cadastrado ainda.{' '}
+                  <button type="button" className="text-btn" onClick={onOpenInvestmentModal}>
+                    Adicionar investimento →
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="panel upcoming">
+              <div className="panel-head">
+                <div>
+                  <h2>Metas de reserva</h2>
+                  <p>Progresso dos seus objetivos guardados</p>
+                </div>
+                <button type="button" className="text-btn" onClick={() => onNavigateView('Investimentos')}>
+                  Ver todas →
+                </button>
+              </div>
+              {reserveGoals.length > 0 ? (
+                <div className="overview-goals-list">
+                  {reserveGoals.map(goal => {
+                    const current = Math.round(investments.filter(inv => inv.goalId === goal.id).reduce((s, inv) => s + inv.currentAmount, 0) * 100) / 100
+                    const pct = goal.targetAmount > 0 ? Math.min(100, Math.round((current / goal.targetAmount) * 100)) : 0
+                    const color = goal.color || '#4d9b6f'
+                    return (
+                      <div className="overview-goal-item" key={goal.id}>
+                        <div className="overview-goal-head">
+                          <b>{goal.name}</b>
+                          <span>
+                            {money(current)} / {money(goal.targetAmount)} ({pct}%)
+                          </span>
+                        </div>
+                        <div className="goal-progress-track">
+                          <i style={{ width: `${pct}%`, background: color }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="empty compact">
+                  Nenhuma meta criada.{' '}
+                  <button type="button" className="text-btn" onClick={onOpenGoalModal}>
+                    Criar Reserva de Emergência →
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="panel reimbursement-panel">
+              <div className="panel-head">
+                <div>
+                  <h2>Maiores posições</h2>
+                  <p>Resumo rápido dos seus principais ativos</p>
+                </div>
+                <button type="button" className="outline-btn" onClick={() => onNavigateView('Investimentos')}>
+                  Abrir Investimentos →
+                </button>
+              </div>
+              {investments.length > 0 ? (
+                [...investments]
+                  .sort((a, b) => b.currentAmount - a.currentAmount)
+                  .slice(0, 5)
+                  .map(inv => {
+                    const meta = INVESTMENT_TYPE_META[inv.type]
+                    const diff = Math.round((inv.currentAmount - inv.investedAmount) * 100) / 100
+                    return (
+                      <div className="reimbursement-row" key={inv.id}>
+                        <div className="reimbursement-person">
+                          <span className="participant-avatar" style={{ background: `${meta.color}22`, color: meta.color }}>
+                            {meta.shortLabel.slice(0, 2).toUpperCase()}
+                          </span>
+                          <div>
+                            <b>{inv.name}</b>
+                            <small style={{ display: 'block', fontSize: '9px', color: '#7b7a71' }}>
+                              {meta.shortLabel}
+                              {inv.institution ? ` · ${inv.institution}` : ''}
+                            </small>
+                          </div>
+                        </div>
+                        <div className="reimbursement-values">
+                          <span>
+                            Saldo <b>{money(inv.currentAmount)}</b>
+                          </span>
+                          <span className={diff >= 0 ? 'inv-overview-pos' : 'inv-overview-neg'}>
+                            Retorno <b>{diff >= 0 ? '+' : '−'} {money(Math.abs(diff))}</b>
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })
+              ) : (
+                <div className="empty compact">
+                  Comece cadastrando uma caixinha, CDB ou ação na aba Investimentos.
+                </div>
+              )}
+            </div>
+          </section>
+        </>
+      ) : (
+        <>
       <section className="stats health-stats">
         <article className="stat-card balance-card">
           <div className="stat-top">
@@ -617,6 +891,8 @@ export function OverviewView({
           )}
         </div>
       </section>
+        </>
+      )}
     </>
   )
 }

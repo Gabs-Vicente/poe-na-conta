@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { OverviewView } from './components/OverviewView'
+import { InvestmentsView } from './components/InvestmentsView'
 import { RecurrencesView } from './components/RecurrencesView'
 import { ReportsView } from './components/ReportsView'
 import { SettingsView } from './components/SettingsView'
@@ -13,6 +14,7 @@ import {
   dateKey,
   expenseFirstMonth,
   formatMoneyInput,
+  INVESTMENT_TYPE_META,
   isDate,
   isManualBillingCard,
   monthKey,
@@ -35,12 +37,16 @@ import {
   type ClosingDayRule,
   type Data,
   type Expense,
+  type Investment,
+  type InvestmentEntryType,
+  type InvestmentType,
   type ManualReimbursement,
   type Method,
   type Occurrence,
   type Participant,
   type ParticipantShare,
   type Recurrence,
+  type ReserveGoal,
 } from './finance'
 import {
   blurActiveInputOnTouch,
@@ -105,14 +111,53 @@ type AdvanceInstallmentsEditor = {
   countToAdvance: number
   customAmount: string
 }
-type ModalKind = 'expense' | 'recurrence' | 'reimbursement' | 'participant-summary' | 'advance' | 'settings' | 'backup' | 'easter-egg' | 'onboarding' | 'reset' | 'confirm' | 'pwa-guide'
+type InvestmentEditor = {
+  id?: string
+  name: string
+  type: InvestmentType
+  institution: string
+  investedAmount: string
+  currentAmount: string
+  goalId: string
+}
+type InvestmentMoveEditor = {
+  investmentId: string
+  investmentName: string
+  mode: InvestmentEntryType
+  amount: string
+  date: string
+  note: string
+  goalId: string
+}
+type ReserveGoalEditor = {
+  id?: string
+  name: string
+  targetAmount: string
+  color: string
+}
+type ModalKind =
+  | 'expense'
+  | 'recurrence'
+  | 'reimbursement'
+  | 'participant-summary'
+  | 'advance'
+  | 'investment'
+  | 'investment-move'
+  | 'goal'
+  | 'settings'
+  | 'backup'
+  | 'easter-egg'
+  | 'onboarding'
+  | 'reset'
+  | 'confirm'
+  | 'pwa-guide'
 type OnboardingStartMode = 'empty' | 'demo' | 'keep'
 type ConfirmDialog = { eyebrow: string; title: string; description: string; confirmLabel: string; onConfirm: () => void }
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
 
 const MODAL_CLOSE_DURATION_MS = 220
 const TOAST_AUTO_DISMISS_MS = 3800
-const SWIPE_VIEWS: MainView[] = ['Visão geral', 'Lançamentos', 'Relatórios', 'Recorrências', 'Ajustes']
+const SWIPE_VIEWS: MainView[] = ['Visão geral', 'Lançamentos', 'Relatórios', 'Investimentos', 'Recorrências', 'Ajustes']
 const CATEGORY_COLOR_PRESETS = [
   { color: '#6e7f72', label: 'Verde sálvia' },
   { color: '#b88b63', label: 'Terracota suave' },
@@ -190,12 +235,17 @@ function App() {
   const [month, setMonth] = useState(monthKey(today))
   const [view, setView] = useState<MainView>(() => {
     const saved = localStorage.getItem('nexus-default-view')
-    return saved === 'Lançamentos' || saved === 'Relatórios' || saved === 'Recorrências' || saved === 'Ajustes' ? saved : 'Visão geral'
+    return saved === 'Lançamentos' || saved === 'Relatórios' || saved === 'Investimentos' || saved === 'Recorrências' || saved === 'Ajustes'
+      ? saved
+      : 'Visão geral'
   })
   const [defaultView, setDefaultView] = useState<MainView>(() => {
     const saved = localStorage.getItem('nexus-default-view')
-    return saved === 'Lançamentos' || saved === 'Relatórios' || saved === 'Recorrências' || saved === 'Ajustes' ? saved : 'Visão geral'
+    return saved === 'Lançamentos' || saved === 'Relatórios' || saved === 'Investimentos' || saved === 'Recorrências' || saved === 'Ajustes'
+      ? saved
+      : 'Visão geral'
   })
+  const [overviewMode, setOverviewMode] = useState<'expenses' | 'investments'>('expenses')
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('nexus-theme') === 'dark' ? 'dark' : 'light'))
   const [defaultTheme, setDefaultTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('nexus-theme') === 'dark' ? 'dark' : 'light'))
   const [profileName, setProfileName] = useState(() => localStorage.getItem('poe-na-conta-profile-name') || '')
@@ -243,6 +293,12 @@ function App() {
   const [participantSummaryTarget, setParticipantSummaryTarget] = useState<Participant | null>(null)
   const [advanceEditor, setAdvanceEditor] = useState<AdvanceInstallmentsEditor | null>(null)
   const [advanceError, setAdvanceError] = useState('')
+  const [investmentEditor, setInvestmentEditor] = useState<InvestmentEditor | null>(null)
+  const [investmentErrors, setInvestmentErrors] = useState<Record<string, string>>({})
+  const [investmentMoveEditor, setInvestmentMoveEditor] = useState<InvestmentMoveEditor | null>(null)
+  const [investmentMoveErrors, setInvestmentMoveErrors] = useState<Record<string, string>>({})
+  const [goalEditor, setGoalEditor] = useState<ReserveGoalEditor | null>(null)
+  const [goalErrors, setGoalErrors] = useState<Record<string, string>>({})
   const [recurrenceSelection, setRecurrenceSelection] = useState<string[] | null>(null)
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([])
   const [form, setForm] = useState<ExpenseForm>(() => ({
@@ -301,6 +357,9 @@ function App() {
     reimbursementEditor ||
     participantSummaryTarget ||
     advanceEditor ||
+    investmentEditor ||
+    investmentMoveEditor ||
+    goalEditor ||
     confirmDialog ||
     onboardingOpen ||
     resetDataModalOpen ||
@@ -2052,6 +2111,236 @@ function App() {
     }
   }
 
+  const investments = data.investments || []
+  const reserveGoals = data.reserveGoals || []
+
+  const openInvestmentModal = (item?: Investment) => {
+    setInvestmentErrors({})
+    setInvestmentEditor({
+      id: item?.id,
+      name: item?.name || '',
+      type: item?.type || 'reserva',
+      institution: item?.institution || '',
+      investedAmount: item ? formatMoneyInput(item.investedAmount) : '',
+      currentAmount: item ? formatMoneyInput(item.currentAmount) : '',
+      goalId: item?.goalId || '',
+    })
+  }
+
+  const closeInvestmentModal = () =>
+    closeModalWithAnimation('investment', () => {
+      setInvestmentEditor(null)
+      setInvestmentErrors({})
+    })
+
+  const saveInvestment = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!investmentEditor) return
+    const nextErrors: Record<string, string> = {}
+    if (!investmentEditor.name.trim()) nextErrors.name = 'Informe o nome do investimento (ex.: Caixinha Nubank).'
+    const invested = investmentEditor.investedAmount.trim() ? parseMoneyInput(investmentEditor.investedAmount) : 0
+    if (!Number.isFinite(invested) || invested < 0) nextErrors.investedAmount = 'Informe um valor válido.'
+    const currentVal = investmentEditor.currentAmount.trim() ? parseMoneyInput(investmentEditor.currentAmount) : invested
+    if (!Number.isFinite(currentVal) || currentVal < 0) nextErrors.currentAmount = 'Informe um valor válido.'
+    if (Object.keys(nextErrors).length > 0) {
+      setInvestmentErrors(nextErrors)
+      triggerFormShake('investment')
+      return
+    }
+    const existing = investmentEditor.id ? investments.find(inv => inv.id === investmentEditor.id) : undefined
+    const roundedInvested = Math.round(invested * 100) / 100
+    const roundedCurrent = Math.round(currentVal * 100) / 100
+    const initialEntries =
+      !existing && roundedInvested > 0
+        ? [{ id: createId(), date: dateKey(today), type: 'aporte' as const, amount: roundedInvested, note: 'Saldo inicial' }]
+        : existing?.entries || []
+    const entry: Investment = {
+      id: existing?.id || createId(),
+      name: investmentEditor.name.trim(),
+      type: investmentEditor.type,
+      ...(investmentEditor.institution.trim() ? { institution: investmentEditor.institution.trim() } : {}),
+      investedAmount: roundedInvested,
+      currentAmount: roundedCurrent,
+      ...(investmentEditor.goalId ? { goalId: investmentEditor.goalId } : {}),
+      entries: initialEntries,
+    }
+    const nextInvestments = existing ? investments.map(inv => (inv.id === entry.id ? entry : inv)) : [entry, ...investments]
+    if (save({ ...data, investments: nextInvestments })) {
+      showToast(existing ? 'Investimento atualizado.' : 'Investimento adicionado!')
+      closeInvestmentModal()
+    }
+  }
+
+  const deleteInvestment = (id: string) => {
+    const target = investments.find(inv => inv.id === id)
+    setConfirmDialog({
+      eyebrow: 'CONFIRMAR EXCLUSÃO',
+      title: target ? `Excluir “${target.name}”?` : 'Excluir investimento?',
+      description: 'Este investimento e seu histórico de movimentações serão removidos.',
+      confirmLabel: 'Excluir investimento',
+      onConfirm: () => {
+        if (save({ ...data, investments: investments.filter(inv => inv.id !== id) })) {
+          showToast('Investimento excluído.')
+        }
+        closeConfirmDialog()
+      },
+    })
+  }
+
+  const openInvestmentMove = (inv: Investment, mode: InvestmentEntryType) => {
+    setInvestmentMoveErrors({})
+    setInvestmentMoveEditor({
+      investmentId: inv.id,
+      investmentName: inv.name,
+      mode,
+      amount: mode === 'atualizacao' ? formatMoneyInput(inv.currentAmount) : '',
+      date: dateKey(today),
+      note: '',
+      goalId: inv.goalId || '',
+    })
+  }
+
+  const closeInvestmentMoveModal = () =>
+    closeModalWithAnimation('investment-move', () => {
+      setInvestmentMoveEditor(null)
+      setInvestmentMoveErrors({})
+    })
+
+  const saveInvestmentMove = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!investmentMoveEditor) return
+    const nextErrors: Record<string, string> = {}
+    const parsedAmount = parseMoneyInput(investmentMoveEditor.amount)
+    if (!investmentMoveEditor.amount.trim()) {
+      nextErrors.amount = 'Informe o valor.'
+    } else if (!Number.isFinite(parsedAmount) || (investmentMoveEditor.mode === 'atualizacao' ? parsedAmount < 0 : parsedAmount <= 0)) {
+      nextErrors.amount = 'Informe um valor válido maior que zero.'
+    }
+    const normalizedDate = normalizeDateInput(investmentMoveEditor.date)
+    if (!investmentMoveEditor.date.trim() || !isDate(normalizedDate)) {
+      nextErrors.date = 'Informe uma data válida.'
+    }
+    if (Object.keys(nextErrors).length > 0) {
+      setInvestmentMoveErrors(nextErrors)
+      triggerFormShake('investment-move')
+      return
+    }
+    const roundedAmt = Math.round(parsedAmount * 100) / 100
+    const nextInvestments = investments.map(inv => {
+      if (inv.id !== investmentMoveEditor.investmentId) return inv
+      let nextInvested = inv.investedAmount
+      let nextCurrent: number
+      if (investmentMoveEditor.mode === 'aporte') {
+        nextInvested = Math.round((inv.investedAmount + roundedAmt) * 100) / 100
+        nextCurrent = Math.round((inv.currentAmount + roundedAmt) * 100) / 100
+      } else if (investmentMoveEditor.mode === 'resgate') {
+        nextInvested = Math.max(0, Math.round((inv.investedAmount - roundedAmt) * 100) / 100)
+        nextCurrent = Math.max(0, Math.round((inv.currentAmount - roundedAmt) * 100) / 100)
+      } else {
+        nextCurrent = roundedAmt
+      }
+      const newEntry = {
+        id: createId(),
+        date: normalizedDate,
+        type: investmentMoveEditor.mode,
+        amount: roundedAmt,
+        ...(investmentMoveEditor.note.trim() ? { note: investmentMoveEditor.note.trim() } : {}),
+      }
+      const nextGoalId = investmentMoveEditor.mode === 'aporte' ? investmentMoveEditor.goalId || undefined : inv.goalId
+      const baseInv = { ...inv }
+      delete baseInv.goalId
+      return {
+        ...baseInv,
+        investedAmount: nextInvested,
+        currentAmount: nextCurrent,
+        ...(nextGoalId ? { goalId: nextGoalId } : {}),
+        entries: [newEntry, ...(inv.entries || [])],
+      }
+    })
+    if (save({ ...data, investments: nextInvestments })) {
+      showToast(
+        investmentMoveEditor.mode === 'aporte'
+          ? 'Aporte registrado!'
+          : investmentMoveEditor.mode === 'resgate'
+            ? 'Resgate registrado!'
+            : 'Saldo atualizado!',
+      )
+      closeInvestmentMoveModal()
+    }
+  }
+
+  const deleteInvestmentEntry = (investmentId: string, entryId: string) => {
+    const nextInvestments = investments.map(inv =>
+      inv.id === investmentId ? { ...inv, entries: (inv.entries || []).filter(e => e.id !== entryId) } : inv,
+    )
+    if (save({ ...data, investments: nextInvestments })) {
+      showToast('Registro removido do histórico.')
+    }
+  }
+
+  const openGoalModal = (goal?: ReserveGoal) => {
+    setGoalErrors({})
+    setGoalEditor({
+      id: goal?.id,
+      name: goal?.name || (reserveGoals.length === 0 ? 'Reserva de Emergência' : ''),
+      targetAmount: goal ? formatMoneyInput(goal.targetAmount) : '',
+      color: goal?.color || '#4d9b6f',
+    })
+  }
+
+  const closeGoalModal = () =>
+    closeModalWithAnimation('goal', () => {
+      setGoalEditor(null)
+      setGoalErrors({})
+    })
+
+  const saveGoal = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!goalEditor) return
+    const nextErrors: Record<string, string> = {}
+    if (!goalEditor.name.trim()) nextErrors.name = 'Informe o nome da meta.'
+    const target = parseMoneyInput(goalEditor.targetAmount)
+    if (!goalEditor.targetAmount.trim() || !Number.isFinite(target) || target <= 0) nextErrors.targetAmount = 'Informe o valor-alvo da meta.'
+    if (Object.keys(nextErrors).length > 0) {
+      setGoalErrors(nextErrors)
+      triggerFormShake('goal')
+      return
+    }
+    const goal: ReserveGoal = {
+      id: goalEditor.id || createId(),
+      name: goalEditor.name.trim(),
+      targetAmount: Math.round(target * 100) / 100,
+      color: goalEditor.color || '#4d9b6f',
+    }
+    const nextGoals = goalEditor.id ? reserveGoals.map(g => (g.id === goal.id ? goal : g)) : [...reserveGoals, goal]
+    if (save({ ...data, reserveGoals: nextGoals })) {
+      showToast(goalEditor.id ? 'Meta atualizada.' : 'Meta de reserva criada!')
+      closeGoalModal()
+    }
+  }
+
+  const deleteGoal = (id: string) => {
+    const target = reserveGoals.find(g => g.id === id)
+    setConfirmDialog({
+      eyebrow: 'CONFIRMAR EXCLUSÃO',
+      title: target ? `Excluir meta “${target.name}”?` : 'Excluir meta?',
+      description: 'Os investimentos vinculados não serão apagados, apenas desvinculados desta meta.',
+      confirmLabel: 'Excluir meta',
+      onConfirm: () => {
+        const nextInvestments = investments.map(inv => {
+          if (inv.goalId !== id) return inv
+          const copy = { ...inv }
+          delete copy.goalId
+          return copy
+        })
+        if (save({ ...data, reserveGoals: reserveGoals.filter(g => g.id !== id), investments: nextInvestments })) {
+          showToast('Meta excluída.')
+        }
+        closeConfirmDialog()
+      },
+    })
+  }
+
   const transactionTable = (
     <TransactionsTable
       view={view}
@@ -2132,9 +2421,9 @@ function App() {
         </a>
         <div className="side-label">MENU</div>
         <nav aria-label="Navegação principal">
-          {(['Visão geral', 'Lançamentos', 'Relatórios', 'Recorrências'] as const).map((v, i) => (
+          {(['Visão geral', 'Lançamentos', 'Relatórios', 'Investimentos', 'Recorrências'] as const).map((v, i) => (
             <button key={v} className={`nav-item ${view === v ? 'active' : ''}`} onClick={() => setView(v)}>
-              <span className="nav-icon">{['◫', '↔', '▥', '↻'][i]}</span>
+              <span className="nav-icon">{['◫', '↔', '▥', '◈', '↻'][i]}</span>
               <span className="nav-label">{v}</span>
             </button>
           ))}
@@ -2208,21 +2497,50 @@ function App() {
               <h1>{view}</h1>
               <p className="subtitle">
                 {view === 'Visão geral'
-                  ? 'Uma leitura clara dos seus gastos e compromissos.'
+                  ? overviewMode === 'investments'
+                    ? 'Resumo rápido do seu patrimônio, metas e rendimentos.'
+                    : 'Uma leitura clara dos seus gastos e compromissos.'
                   : view === 'Lançamentos'
                     ? 'Encontre, ordene e acompanhe cada movimentação.'
                     : view === 'Relatórios'
                       ? 'Entenda como seus gastos se distribuem ao longo do tempo.'
-                      : view === 'Recorrências'
-                        ? 'Revise as despesas que se repetem antes de lançar no mês.'
-                        : 'Personalize categorias, cartões e pessoas com quem divide despesas.'}
+                      : view === 'Investimentos'
+                        ? 'Acompanhe o que você está guardando, seus rendimentos e metas de reserva.'
+                        : view === 'Recorrências'
+                          ? 'Revise as despesas que se repetem antes de lançar no mês.'
+                          : 'Personalize categorias, cartões e pessoas com quem divide despesas.'}
               </p>
             </div>
-            {view !== 'Ajustes' && (
-              <button className="primary" onClick={() => (view === 'Recorrências' ? openRecurrence() : openNewExpenseModal())}>
-                <span>＋</span> {view === 'Recorrências' ? 'Nova recorrência' : 'Nova despesa'}
-              </button>
-            )}
+            {view !== 'Ajustes' && (() => {
+              const ctaMode = view === 'Recorrências'
+                ? 'recurrence'
+                : view === 'Investimentos' || (view === 'Visão geral' && overviewMode === 'investments')
+                  ? 'investment'
+                  : 'expense'
+              return (
+                <button
+                  className={`primary heading-cta-btn ${ctaMode === 'investment' ? 'is-investment-mode' : ''}`}
+                  onClick={() =>
+                    ctaMode === 'recurrence'
+                      ? openRecurrence()
+                      : ctaMode === 'investment'
+                        ? openInvestmentModal()
+                        : openNewExpenseModal()
+                  }
+                >
+                  <span key={ctaMode} className="heading-cta-inner">
+                    <span className="heading-cta-plus" aria-hidden="true">＋</span>
+                    <span>
+                      {ctaMode === 'recurrence'
+                        ? 'Nova recorrência'
+                        : ctaMode === 'investment'
+                          ? 'Novo investimento'
+                          : 'Nova despesa'}
+                    </span>
+                  </span>
+                </button>
+              )
+            })()}
           </div>
           {!isStandalone && !pwaBannerDismissed && !onboardingOpen && (Boolean(deferredInstallPrompt) || isTouchDevice()) && (
             <div className="pwa-install-banner" role="region" aria-label="Instalar aplicativo">
@@ -2414,9 +2732,26 @@ function App() {
                 })
               }
             />
+          ) : view === 'Investimentos' ? (
+            <InvestmentsView
+              theme={theme}
+              investments={investments}
+              reserveGoals={reserveGoals}
+              month={month}
+              onOpenInvestmentModal={openInvestmentModal}
+              onDeleteInvestment={deleteInvestment}
+              onOpenInvestmentMove={openInvestmentMove}
+              onOpenGoalModal={openGoalModal}
+              onDeleteGoal={deleteGoal}
+              onDeleteEntry={deleteInvestmentEntry}
+            />
           ) : view === 'Visão geral' ? (
             <OverviewView
               data={data}
+              overviewMode={overviewMode}
+              onOverviewModeChange={setOverviewMode}
+              onOpenInvestmentModal={() => openInvestmentModal()}
+              onOpenGoalModal={() => openGoalModal()}
               month={month}
               theme={theme}
               previousMonth={previousMonth}
@@ -4432,6 +4767,396 @@ function App() {
               </button>
             </div>
           </section>
+        </div>
+      )}
+
+      {investmentEditor && (
+        <div
+          className={`modal-backdrop ${closingModal === 'investment' ? 'is-closing' : ''}`}
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) closeInvestmentModal()
+          }}
+        >
+          <form
+            noValidate
+            className={`modal investment-modal ${formShake === 'investment' ? 'is-shaking' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="investment-modal-title"
+            onSubmit={saveInvestment}
+            onAnimationEnd={event => {
+              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">CARTEIRA DE INVESTIMENTOS</span>
+                <h2 id="investment-modal-title">{investmentEditor.id ? 'Editar investimento' : 'Novo investimento'}</h2>
+              </div>
+              <button type="button" aria-label="Fechar investimento" onClick={closeInvestmentModal}>
+                ×
+              </button>
+            </div>
+            <label className={investmentErrors.name ? 'is-invalid' : ''}>
+              Nome da aplicação / caixinha
+              <input
+                autoFocus={!isTouchDevice()}
+                enterKeyHint="done"
+                onKeyDown={dismissKeyboardOnEnter}
+                maxLength={60}
+                aria-invalid={Boolean(investmentErrors.name)}
+                placeholder="Ex.: Caixinha Nubank, CDB Inter 110%, MXRF11..."
+                value={investmentEditor.name}
+                onChange={e => {
+                  clearFieldError(setInvestmentErrors, 'name')
+                  setInvestmentEditor({ ...investmentEditor, name: e.target.value })
+                }}
+              />
+              {investmentErrors.name && (
+                <small className="field-error-msg" role="alert">
+                  {investmentErrors.name}
+                </small>
+              )}
+            </label>
+            <div className="form-row">
+              <label>
+                Tipo de investimento
+                <select
+                  value={investmentEditor.type}
+                  onFocus={blurActiveInputOnTouch}
+                  onChange={e => setInvestmentEditor({ ...investmentEditor, type: e.target.value as InvestmentType })}
+                >
+                  {(Object.keys(INVESTMENT_TYPE_META) as InvestmentType[]).map(typeKey => (
+                    <option key={typeKey} value={typeKey}>
+                      {INVESTMENT_TYPE_META[typeKey].label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Instituição / Corretora (opcional)
+                <input
+                  enterKeyHint="done"
+                  onKeyDown={dismissKeyboardOnEnter}
+                  maxLength={40}
+                  placeholder="Ex.: Nubank, Inter, XP..."
+                  value={investmentEditor.institution}
+                  onChange={e => setInvestmentEditor({ ...investmentEditor, institution: e.target.value })}
+                />
+              </label>
+            </div>
+            <div className="form-row">
+              <label className={investmentErrors.investedAmount ? 'is-invalid' : ''}>
+                Total aportado até hoje
+                <div className="money-input-wrap">
+                  <span className="money-prefix" aria-hidden="true">R$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    enterKeyHint="done"
+                    onKeyDown={dismissKeyboardOnEnter}
+                    aria-invalid={Boolean(investmentErrors.investedAmount)}
+                    placeholder="0,00"
+                    value={investmentEditor.investedAmount}
+                    onChange={e => {
+                      clearFieldError(setInvestmentErrors, 'investedAmount')
+                      setInvestmentEditor({ ...investmentEditor, investedAmount: formatMoneyInput(e.target.value) })
+                    }}
+                  />
+                </div>
+                {investmentErrors.investedAmount && (
+                  <small className="field-error-msg" role="alert">
+                    {investmentErrors.investedAmount}
+                  </small>
+                )}
+              </label>
+              <label className={investmentErrors.currentAmount ? 'is-invalid' : ''}>
+                Saldo atual (opcional)
+                <div className="money-input-wrap">
+                  <span className="money-prefix" aria-hidden="true">R$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    enterKeyHint="done"
+                    onKeyDown={dismissKeyboardOnEnter}
+                    aria-invalid={Boolean(investmentErrors.currentAmount)}
+                    placeholder="Igual ao aportado"
+                    value={investmentEditor.currentAmount}
+                    onChange={e => {
+                      clearFieldError(setInvestmentErrors, 'currentAmount')
+                      setInvestmentEditor({ ...investmentEditor, currentAmount: formatMoneyInput(e.target.value) })
+                    }}
+                  />
+                </div>
+                {investmentErrors.currentAmount && (
+                  <small className="field-error-msg" role="alert">
+                    {investmentErrors.currentAmount}
+                  </small>
+                )}
+              </label>
+            </div>
+            <label>
+              Faz parte de alguma meta de reserva?
+              <select
+                value={investmentEditor.goalId}
+                onFocus={blurActiveInputOnTouch}
+                onChange={e => setInvestmentEditor({ ...investmentEditor, goalId: e.target.value })}
+              >
+                <option value="">Não vincular a nenhuma meta</option>
+                {reserveGoals.map(goal => (
+                  <option key={goal.id} value={goal.id}>
+                    🛡 {goal.name} (meta: {money(goal.targetAmount)})
+                  </option>
+                ))}
+              </select>
+              {reserveGoals.length === 0 && (
+                <small className="form-help">
+                  Você ainda não criou metas de reserva (ex.: Reserva de Emergência). Crie uma na aba Investimentos para vincular aqui.
+                </small>
+              )}
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="cancel-btn" onClick={closeInvestmentModal}>
+                Cancelar
+              </button>
+              <button className="primary" type="submit">
+                {investmentEditor.id ? 'Salvar alterações' : 'Adicionar investimento'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {investmentMoveEditor && (
+        <div
+          className={`modal-backdrop ${closingModal === 'investment-move' ? 'is-closing' : ''}`}
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) closeInvestmentMoveModal()
+          }}
+        >
+          <form
+            noValidate
+            className={`modal investment-move-modal ${formShake === 'investment-move' ? 'is-shaking' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="investment-move-title"
+            onSubmit={saveInvestmentMove}
+            onAnimationEnd={event => {
+              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">
+                  {investmentMoveEditor.mode === 'aporte'
+                    ? 'NOVO APORTE'
+                    : investmentMoveEditor.mode === 'resgate'
+                      ? 'NOVO RESGATE'
+                      : 'ATUALIZAR SALDO'}
+                </span>
+                <h2 id="investment-move-title">{investmentMoveEditor.investmentName}</h2>
+              </div>
+              <button type="button" aria-label="Fechar movimentação" onClick={closeInvestmentMoveModal}>
+                ×
+              </button>
+            </div>
+            <p className="form-help participant-modal-help">
+              {investmentMoveEditor.mode === 'aporte'
+                ? 'O valor aportado será somado ao total aplicado e ao saldo atual deste investimento.'
+                : investmentMoveEditor.mode === 'resgate'
+                  ? 'O valor resgatado será subtraído do saldo atual e do total aportado.'
+                  : 'Digite quanto você vê hoje no app do banco/corretora para recalcular o rendimento automaticamente.'}
+            </p>
+            <div className="form-row">
+              <label className={investmentMoveErrors.amount ? 'is-invalid' : ''}>
+                {investmentMoveEditor.mode === 'atualizacao' ? 'Novo saldo atual' : 'Valor'}
+                <div className="money-input-wrap">
+                  <span className="money-prefix" aria-hidden="true">R$</span>
+                  <input
+                    autoFocus={!isTouchDevice()}
+                    type="text"
+                    inputMode="decimal"
+                    enterKeyHint="done"
+                    onKeyDown={dismissKeyboardOnEnter}
+                    aria-invalid={Boolean(investmentMoveErrors.amount)}
+                    placeholder="0,00"
+                    value={investmentMoveEditor.amount}
+                    onChange={e => {
+                      clearFieldError(setInvestmentMoveErrors, 'amount')
+                      setInvestmentMoveEditor({ ...investmentMoveEditor, amount: formatMoneyInput(e.target.value) })
+                    }}
+                  />
+                </div>
+                {investmentMoveErrors.amount && (
+                  <small className="field-error-msg" role="alert">
+                    {investmentMoveErrors.amount}
+                  </small>
+                )}
+              </label>
+              <label className={investmentMoveErrors.date ? 'is-invalid' : ''}>
+                Data
+                <input
+                  type="date"
+                  aria-invalid={Boolean(investmentMoveErrors.date)}
+                  value={investmentMoveEditor.date}
+                  onFocus={blurActiveInputOnTouch}
+                  onChange={e => {
+                    clearFieldError(setInvestmentMoveErrors, 'date')
+                    setInvestmentMoveEditor({ ...investmentMoveEditor, date: e.target.value })
+                  }}
+                />
+                {investmentMoveErrors.date && (
+                  <small className="field-error-msg" role="alert">
+                    {investmentMoveErrors.date}
+                  </small>
+                )}
+              </label>
+            </div>
+            {investmentMoveEditor.mode === 'aporte' && (
+              <label>
+                Entra em alguma meta de reserva?
+                <select
+                  value={investmentMoveEditor.goalId}
+                  onFocus={blurActiveInputOnTouch}
+                  onChange={e => setInvestmentMoveEditor({ ...investmentMoveEditor, goalId: e.target.value })}
+                >
+                  <option value="">Não contabilizar em meta de reserva</option>
+                  {reserveGoals.map(goal => (
+                    <option key={goal.id} value={goal.id}>
+                      🛡 {goal.name} (meta: {money(goal.targetAmount)})
+                    </option>
+                  ))}
+                </select>
+                <small className="form-help">
+                  Escolha se este investimento/aporte deve somar na sua Reserva de Emergência ou outra meta.
+                </small>
+              </label>
+            )}
+            <label>
+              Observação (opcional)
+              <input
+                enterKeyHint="done"
+                onKeyDown={dismissKeyboardOnEnter}
+                maxLength={80}
+                placeholder="Ex.: Aporte do salário, rendimento mensal..."
+                value={investmentMoveEditor.note}
+                onChange={e => setInvestmentMoveEditor({ ...investmentMoveEditor, note: e.target.value })}
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="cancel-btn" onClick={closeInvestmentMoveModal}>
+                Cancelar
+              </button>
+              <button className="primary" type="submit">
+                {investmentMoveEditor.mode === 'aporte'
+                  ? 'Confirmar aporte'
+                  : investmentMoveEditor.mode === 'resgate'
+                    ? 'Confirmar resgate'
+                    : 'Atualizar saldo'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {goalEditor && (
+        <div
+          className={`modal-backdrop ${closingModal === 'goal' ? 'is-closing' : ''}`}
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) closeGoalModal()
+          }}
+        >
+          <form
+            noValidate
+            className={`modal goal-modal ${formShake === 'goal' ? 'is-shaking' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="goal-modal-title"
+            onSubmit={saveGoal}
+            onAnimationEnd={event => {
+              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">METAS DE RESERVA</span>
+                <h2 id="goal-modal-title">{goalEditor.id ? 'Editar meta' : 'Nova meta de reserva'}</h2>
+              </div>
+              <button type="button" aria-label="Fechar meta" onClick={closeGoalModal}>
+                ×
+              </button>
+            </div>
+            <label className={goalErrors.name ? 'is-invalid' : ''}>
+              Nome da meta
+              <input
+                autoFocus={!isTouchDevice()}
+                enterKeyHint="done"
+                onKeyDown={dismissKeyboardOnEnter}
+                maxLength={50}
+                aria-invalid={Boolean(goalErrors.name)}
+                placeholder="Ex.: Reserva de Emergência, Viagem, Trocar de celular..."
+                value={goalEditor.name}
+                onChange={e => {
+                  clearFieldError(setGoalErrors, 'name')
+                  setGoalEditor({ ...goalEditor, name: e.target.value })
+                }}
+              />
+              {goalErrors.name && (
+                <small className="field-error-msg" role="alert">
+                  {goalErrors.name}
+                </small>
+              )}
+              {!goalEditor.id && (
+                <div className="store-card-presets" role="group" aria-label="Sugestões de meta">
+                  {['Reserva de Emergência', 'Viagem', 'Entrada / Imóvel', 'Reserva para PC / Celular'].map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={`store-preset-chip ${goalEditor.name === preset ? 'is-active' : ''}`}
+                      onClick={() => {
+                        clearFieldError(setGoalErrors, 'name')
+                        setGoalEditor({ ...goalEditor, name: preset })
+                      }}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </label>
+            <label className={goalErrors.targetAmount ? 'is-invalid' : ''}>
+              Valor-alvo da meta
+              <div className="money-input-wrap">
+                <span className="money-prefix" aria-hidden="true">R$</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  enterKeyHint="done"
+                  onKeyDown={dismissKeyboardOnEnter}
+                  aria-invalid={Boolean(goalErrors.targetAmount)}
+                  placeholder="0,00"
+                  value={goalEditor.targetAmount}
+                  onChange={e => {
+                    clearFieldError(setGoalErrors, 'targetAmount')
+                    setGoalEditor({ ...goalEditor, targetAmount: formatMoneyInput(e.target.value) })
+                  }}
+                />
+              </div>
+              {goalErrors.targetAmount && (
+                <small className="field-error-msg" role="alert">
+                  {goalErrors.targetAmount}
+                </small>
+              )}
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="cancel-btn" onClick={closeGoalModal}>
+                Cancelar
+              </button>
+              <button className="primary" type="submit">
+                {goalEditor.id ? 'Salvar alterações' : 'Criar meta'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

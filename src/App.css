@@ -1026,3 +1026,150 @@ footer{color:#89877f}
   .reports-panels-grid{gap:12px}
   .report-kpi-card{min-height:118px;padding:15px 16px}
 }
+
+/* Visão geral — alternador Despesas | Investimentos */
+.overview-mode-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.overview-mode-switch{display:inline-flex;align-items:center;gap:4px;padding:4px;border-radius:12px;border:1px solid #e2e4db;background:#f4f5ef}
+.overview-mode-switch button{border:none;background:transparent;color:#686c5e;font:600 13px/1 inherit;padding:8px 14px;border-radius:9px;cursor:pointer;transition:background .16s ease,color .16s ease,box-shadow .16s ease}
+.overview-mode-switch button:hover{color:#1f231a}
+.overview-mode-switch button.is-active{background:#ffffff;color:#171a13;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.overview-inv-goto-btn{border:1px solid #d5dacd;background:#ffffff;color:#273123;font:600 12px/1 inherit;padding:9px 14px;border-radius:10px;cursor:pointer;transition:background .16s ease,border-color .16s ease}
+.overview-inv-goto-btn:hover{background:#f5f7f0;border-color:#b7c2ad}
+
+.overview-goals-list{display:flex;flex-direction:column;gap:14px}
+.overview-goal-item{display:flex;flex-direction:column;gap:6px}
+.overview-goal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}
+.overview-goal-head strong{display:inline-flex;align-items:center;gap:7px;font-weight:600}
+.overview-goal-head span{color:#6d7263;font-size:12px}
+
+.inv-overview-pos{color:#1f7a46;font-weight:600}
+.inv-overview-neg{color:#b83b3b;font-weight:600}
+
+/* Aba Investimentos e Metas de Reserva */
+.investments-page{display:flex;flex-direction:column;gap:18px}
+.goals-panel,.investments-list-panel{padding:20px;border-radius:16px}
+.goals-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px;margin-top:14px}
+.goal-card{border:1px solid #e3e6dc;background:#fafbf7;border-radius:14px;padding:15px 16px;display:flex;flex-direction:column;gap:10px}
+.goal-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.goal-card-title{display:flex;align-items:center;gap:8px;min-width:0}
+.goal-card-title strong{font-size:15px;font-weight:650;color:#1b1e16;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.goal-dot{width:10px;height:10px;border-radius:999px;flex:0 0 auto;background:#3e8f60}
+.goal-card-actions{display:inline-flex;align-items:center;gap:6px;flex-shrink:0}
+.goal-percent-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:#e6f2ea;color:#216e42}
+.goal-progress-track{height:8px;border-radius:999px;background:#e6e9de;overflow:hidden}
+.goal-progress-track>div{height:100%;border-radius:999px;background:#3e8f60;transition:width .24s ease}
+.goal-card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#5c6154;flex-wrap:wrap}
+.goal-done-text{color:#1f7a46;font-weight:600}
+
+.investments-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;margin-top:14px}
+.investment-card{border:1px solid #e3e6dc;background:#fafbf7;border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.investment-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.investment-card-title{display:flex;flex-direction:column;gap:3px;min-width:0}
+.investment-card-title strong{font-size:15px;font-weight:650;color:#1b1e16}
+.investment-card-title span{font-size:12px;color:#686c5e}
+.investment-badges-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.investment-type-badge,.investment-goal-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid #dce1d3;background:#ffffff;color:#454a3d}
+.investment-goal-badge{background:#eaf4ed;border-color:#c6e0ce;color:#206b40}
+.investment-card-balance{display:flex;flex-direction:column;gap:2px}
+.investment-card-balance span{font-size:11px;color:#6b7061;text-transform:uppercase;letter-spacing:.04em}
+.investment-card-balance strong{font-size:22px;font-weight:700;letter-spacing:-.02em;color:#171a13}
+.investment-card-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px;border-radius:10px;background:#f2f4ec;font-size:12px}
+.investment-card-metrics>div{display:flex;flex-direction:column;gap:2px}
+.investment-card-metrics span{color:#6a6f61;font-size:11px}
+.investment-card-metrics strong{font-weight:650;color:#22261c}
+.investment-card-metrics strong.is-positive{color:#1f7a46}
+.investment-card-metrics strong.is-negative{color:#b83b3b}
+
+.investment-card-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:2px}
+.inv-action-btn{border:1px solid #d9ded0;background:#ffffff;color:#262b20;font:600 12px/1 inherit;padding:7px 10px;border-radius:8px;cursor:pointer;transition:background .15s ease,border-color .15s ease}
+.inv-action-btn:hover{background:#f0f3ea;border-color:#bcc5af}
+.inv-action-btn.is-primary{background:#225c3c;border-color:#225c3c;color:#ffffff}
+.inv-action-btn.is-primary:hover{background:#1b4b31}
+.inv-action-btn.is-danger{color:#a83232;border-color:#e7c7c7}
+.inv-action-btn.is-danger:hover{background:#fdf0f0}
+
+.inv-entry-badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid transparent}
+.inv-entry-badge.is-aporte{background:#e6f4eb;border-color:#c2e2cd;color:#1d6b3e}
+.inv-entry-badge.is-resgate{background:#fbeaea;border-color:#eec6c6;color:#a33131}
+.inv-entry-badge.is-atualizacao{background:#edf1f7;border-color:#cfd9e8;color:#32527a}
+.inv-val-positive{color:#1f7a46;font-weight:600}
+.inv-val-negative{color:#b83b3b;font-weight:600}
+
+/* Modais de Investimentos e Metas */
+.investment-modal,.investment-move-modal,.goal-modal{max-width:540px}
+
+/* Dark theme */
+.app-shell[data-theme="dark"] .overview-mode-switch{background:#1c1e19;border-color:#34362e}
+.app-shell[data-theme="dark"] .overview-mode-switch button{color:#9d9c91}
+.app-shell[data-theme="dark"] .overview-mode-switch button:hover{color:#eceae1}
+.app-shell[data-theme="dark"] .overview-mode-switch button.is-active{background:#2a2d25;color:#f3f1e8;box-shadow:0 1px 3px rgba(0,0,0,.28)}
+.app-shell[data-theme="dark"] .overview-inv-goto-btn{background:#242620;border-color:#383a32;color:#e7e5dc}
+.app-shell[data-theme="dark"] .overview-inv-goto-btn:hover{background:#2d3028;border-color:#4b4e43}
+.app-shell[data-theme="dark"] .overview-goal-head span{color:#9e9d92}
+.app-shell[data-theme="dark"] .inv-overview-pos{color:#78d29b}
+.app-shell[data-theme="dark"] .inv-overview-neg{color:#f08c8c}
+
+.app-shell[data-theme="dark"] .goal-card,
+.app-shell[data-theme="dark"] .investment-card{background:#1f211c;border-color:#33362e}
+.app-shell[data-theme="dark"] .goal-card-title strong,
+.app-shell[data-theme="dark"] .investment-card-title strong,
+.app-shell[data-theme="dark"] .investment-card-balance strong{color:#f2f0e7}
+.app-shell[data-theme="dark"] .goal-percent-badge{background:#213327;color:#9edbb6}
+.app-shell[data-theme="dark"] .goal-progress-track{background:#2d3028}
+.app-shell[data-theme="dark"] .goal-card-foot,
+.app-shell[data-theme="dark"] .investment-card-title span,
+.app-shell[data-theme="dark"] .investment-card-balance span{color:#9e9d92}
+.app-shell[data-theme="dark"] .goal-done-text{color:#78d29b}
+
+.app-shell[data-theme="dark"] .investment-type-badge{background:#272922;border-color:#3a3d33;color:#d6d4ca}
+.app-shell[data-theme="dark"] .investment-goal-badge{background:#1d2e23;border-color:#33523e;color:#9edbb6}
+.app-shell[data-theme="dark"] .investment-card-metrics{background:#262821}
+.app-shell[data-theme="dark"] .investment-card-metrics span{color:#9e9d92}
+.app-shell[data-theme="dark"] .investment-card-metrics strong{color:#eceae1}
+.app-shell[data-theme="dark"] .investment-card-metrics strong.is-positive{color:#78d29b}
+.app-shell[data-theme="dark"] .investment-card-metrics strong.is-negative{color:#f08c8c}
+
+.app-shell[data-theme="dark"] .inv-action-btn{background:#262821;border-color:#3a3d33;color:#e8e6dd}
+.app-shell[data-theme="dark"] .inv-action-btn:hover{background:#30332a;border-color:#4c5043}
+.app-shell[data-theme="dark"] .inv-action-btn.is-primary{background:#2e6f4a;border-color:#3d875d;color:#f5fbf7}
+.app-shell[data-theme="dark"] .inv-action-btn.is-primary:hover{background:#368055}
+.app-shell[data-theme="dark"] .inv-action-btn.is-danger{color:#f08c8c;border-color:#573232}
+.app-shell[data-theme="dark"] .inv-action-btn.is-danger:hover{background:#352020}
+
+.app-shell[data-theme="dark"] .inv-entry-badge.is-aporte{background:#1e3125;border-color:#32533e;color:#9edbb6}
+.app-shell[data-theme="dark"] .inv-entry-badge.is-resgate{background:#362020;border-color:#5b3333;color:#f19b9b}
+.app-shell[data-theme="dark"] .inv-entry-badge.is-atualizacao{background:#1f2836;border-color:#354761;color:#9fc0eb}
+.app-shell[data-theme="dark"] .inv-val-positive{color:#78d29b}
+.app-shell[data-theme="dark"] .inv-val-negative{color:#f08c8c}
+
+@media(max-width:640px){
+  .goals-grid,.investments-grid{grid-template-columns:1fr}
+  .overview-mode-bar{align-items:stretch}
+  .overview-mode-switch{width:100%;justify-content:stretch}
+  .overview-mode-switch button{flex:1}
+}
+
+/* Botão principal do cabeçalho com transição entre Despesas e Investimentos */
+.heading-cta-btn{display:inline-flex;align-items:center;justify-content:center;position:relative;overflow:hidden;transition:background-color .28s cubic-bezier(.22,1,.36,1),color .28s ease,box-shadow .28s ease,transform .18s ease}
+.heading-cta-btn:active{transform:scale(.97)}
+.heading-cta-btn.is-investment-mode{background:#1d7557;box-shadow:0 4px 12px rgba(29,117,87,.24)}
+.heading-cta-btn.is-investment-mode:hover{background:#165d45}
+.app-shell[data-theme="dark"] .heading-cta-btn.is-investment-mode{background:#73c997;color:#112318;box-shadow:0 4px 14px rgba(115,201,151,.22)}
+.app-shell[data-theme="dark"] .heading-cta-btn.is-investment-mode:hover{background:#84d4a5}
+
+.heading-cta-inner{display:inline-flex;align-items:center;justify-content:center;gap:6px;margin-right:0!important;font-size:inherit!important;vertical-align:baseline!important;animation:ctaMorphIn .32s cubic-bezier(.22,1,.36,1) both}
+.heading-cta-inner>span:last-child{font-size:inherit;vertical-align:baseline;margin-right:0}
+.heading-cta-plus{display:inline-block;font-size:16px;line-height:1;margin-right:0!important;vertical-align:baseline!important;animation:ctaPlusSpin .36s cubic-bezier(.22,1,.36,1) both}
+
+@keyframes ctaMorphIn{
+  0%{opacity:0;transform:translateY(8px) scale(.94);filter:blur(2px)}
+  100%{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}
+}
+@keyframes ctaPlusSpin{
+  0%{transform:rotate(-90deg) scale(.7)}
+  100%{transform:rotate(0deg) scale(1)}
+}
+@media(prefers-reduced-motion:reduce){
+  .heading-cta-inner,.heading-cta-plus{animation:none}
+  .heading-cta-btn{transition:none}
+}

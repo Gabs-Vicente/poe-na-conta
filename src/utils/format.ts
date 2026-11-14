@@ -1,6 +1,6 @@
 import React from 'react'
 
-export type MainView = 'Visão geral' | 'Lançamentos' | 'Relatórios' | 'Recorrências' | 'Ajustes'
+export type MainView = 'Visão geral' | 'Lançamentos' | 'Relatórios' | 'Investimentos' | 'Recorrências' | 'Ajustes'
 export type SortOrder = 'date-desc' | 'date-asc' | 'value-desc' | 'value-asc' | 'desc-asc'
 
 export const money = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })

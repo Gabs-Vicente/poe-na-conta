@@ -133,6 +133,7 @@ export function SettingsView({
               <option>Visão geral</option>
               <option>Lançamentos</option>
               <option>Relatórios</option>
+              <option>Investimentos</option>
               <option>Recorrências</option>
               <option>Ajustes</option>
             </select>

@@ -91,7 +91,7 @@ type ManualReimbursementEditor = {
   cardId: string
   categoryId: string
 }
-type ModalKind = 'expense' | 'recurrence' | 'reimbursement' | 'settings' | 'backup' | 'easter-egg' | 'onboarding' | 'reset' | 'confirm' | 'pwa-guide'
+type ModalKind = 'expense' | 'recurrence' | 'reimbursement' | 'participant-summary' | 'settings' | 'backup' | 'easter-egg' | 'onboarding' | 'reset' | 'confirm' | 'pwa-guide'
 type OnboardingStartMode = 'empty' | 'demo' | 'keep'
 type ConfirmDialog = { eyebrow: string; title: string; description: string; confirmLabel: string; onConfirm: () => void }
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
@@ -186,6 +186,7 @@ function App() {
   const [defaultTheme, setDefaultTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('nexus-theme') === 'dark' ? 'dark' : 'light'))
   const [profileName, setProfileName] = useState(() => localStorage.getItem('poe-na-conta-profile-name') || '')
   const [profilePhoto, setProfilePhoto] = useState(() => localStorage.getItem('poe-na-conta-profile-photo') || '')
+  const [pixKey, setPixKey] = useState(() => localStorage.getItem('poe-na-conta-pix-key') || '')
   const [profileMessage, setProfileMessage] = useState('')
   const profilePhotoInput = useRef<HTMLInputElement>(null)
   const [monthlyLimit, setMonthlyLimit] = useState(() => localStorage.getItem('poe-na-conta-monthly-limit') || '')
@@ -224,6 +225,7 @@ function App() {
   const [settingsModal, setSettingsModal] = useState<SettingEditor | null>(null)
   const [recurrenceEditor, setRecurrenceEditor] = useState<RecurrenceEditor | null>(null)
   const [reimbursementEditor, setReimbursementEditor] = useState<ManualReimbursementEditor | null>(null)
+  const [participantSummaryTarget, setParticipantSummaryTarget] = useState<Participant | null>(null)
   const [recurrenceSelection, setRecurrenceSelection] = useState<string[] | null>(null)
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([])
   const [form, setForm] = useState<ExpenseForm>(() => ({
@@ -246,15 +248,40 @@ function App() {
   const [returnToExpenseAfterParticipant, setReturnToExpenseAfterParticipant] = useState(false)
   const [participantsSectionOpen, setParticipantsSectionOpen] = useState(false)
   const [keepExpenseModalOpen, setKeepExpenseModalOpen] = useState(false)
+  const [lastUsedCardId, setLastUsedCardId] = useState(() => localStorage.getItem('poe-na-conta-last-card-id') || '')
   const expenseDescInputRef = useRef<HTMLInputElement>(null)
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null)
   const swipeStartRef = useRef<{ x: number; y: number; time: number; blocked: boolean } | null>(null)
+
+  const getPreferredCard = (cards = data.cards, expenses = data.expenses): Card | undefined => {
+    if (lastUsedCardId) {
+      const matched = cards.find(c => c.id === lastUsedCardId)
+      if (matched) return matched
+    }
+    const lastCreditExpense = expenses.find(e => e.method.startsWith('Crédito') && e.cardId)
+    if (lastCreditExpense?.cardId) {
+      const matched = cards.find(c => c.id === lastCreditExpense.cardId)
+      if (matched) return matched
+    }
+    return cards[0]
+  }
+
+  const rememberCard = (cardId?: string) => {
+    if (!cardId) return
+    setLastUsedCardId(cardId)
+    try {
+      localStorage.setItem('poe-na-conta-last-card-id', cardId)
+    } catch {
+      /* ignore */
+    }
+  }
 
   const hasAnyOpenModal = Boolean(
     modal ||
     settingsModal ||
     recurrenceEditor ||
     reimbursementEditor ||
+    participantSummaryTarget ||
     confirmDialog ||
     onboardingOpen ||
     resetDataModalOpen ||
@@ -404,7 +431,7 @@ function App() {
   }
 
   const openNewExpenseModal = () => {
-    const defaultCard = data.cards[0]
+    const defaultCard = getPreferredCard()
     setEditingExpenseId(null)
     setShareError('')
     setExpenseErrors({})
@@ -876,6 +903,10 @@ function App() {
     setProfileName(value)
     localStorage.setItem('poe-na-conta-profile-name', value)
   }
+  const updatePixKey = (value: string) => {
+    setPixKey(value)
+    localStorage.setItem('poe-na-conta-pix-key', value)
+  }
   const updateProfilePhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -919,13 +950,14 @@ function App() {
 
   const openRecurrence = (item?: Recurrence) => {
     setRecurrenceErrors({})
+    const preferredCard = getPreferredCard()
     setRecurrenceEditor({
       id: item?.id,
       description: item?.description || '',
       amount: item ? formatMoneyInput(item.amount) : '',
       category: item?.category || data.categories[0]?.id || '',
       method: item?.method || 'PIX',
-      cardId: item?.cardId || data.cards[0]?.id || '',
+      cardId: item?.cardId || preferredCard?.id || '',
       day: String(item?.day || 1),
     })
   }
@@ -1068,7 +1100,8 @@ function App() {
     }
     setExpenseErrors({})
     setShareError('')
-    const card = form.method.startsWith('Crédito') ? data.cards.find(c => c.id === form.cardId) || data.cards[0] : undefined
+    const card = form.method.startsWith('Crédito') ? data.cards.find(c => c.id === form.cardId) || getPreferredCard() : undefined
+    if (card?.id) rememberCard(card.id)
     const onClosingDay = Boolean(card && Number(normalizedDate.slice(-2)) === card.closingDay)
     const firstMonth = expenseFirstMonth(normalizedDate, form.method, card, onClosingDay ? form.afterClosing : undefined)
     const entry: Expense = {
@@ -1085,7 +1118,7 @@ function App() {
       shares,
     }
     if (!save({ ...data, expenses: editingExpenseId ? data.expenses.map(e => (e.id === editingExpenseId ? entry : e)) : [entry, ...data.expenses] })) return
-    const nextCard = card || data.cards[0]
+    const nextCard = card || getPreferredCard()
     if (!editingExpenseId && keepExpenseModalOpen) {
       if (firstMonth !== month) {
         showToast(`Lançamento salvo em ${monthName(firstMonth)}. Pronto para o próximo!`)
@@ -1272,7 +1305,7 @@ function App() {
       return
     }
     const blob = new Blob(
-      [createBackup(data, { monthlyLimit, limitNoticePercent: String(limitNoticePercentValue), defaultView, theme, profileName, profilePhoto })],
+      [createBackup(data, { monthlyLimit, limitNoticePercent: String(limitNoticePercentValue), defaultView, theme, profileName, profilePhoto, pixKey })],
       { type: 'application/json;charset=utf-8' },
     )
     const url = URL.createObjectURL(blob)
@@ -1307,6 +1340,10 @@ function App() {
         setProfilePhoto(payload.preferences.profilePhoto)
         if (payload.preferences.profilePhoto) localStorage.setItem('poe-na-conta-profile-photo', payload.preferences.profilePhoto)
         else localStorage.removeItem('poe-na-conta-profile-photo')
+      }
+      if (payload.preferences.pixKey !== undefined) {
+        setPixKey(payload.preferences.pixKey)
+        localStorage.setItem('poe-na-conta-pix-key', payload.preferences.pixKey)
       }
     }
     localStorage.setItem('poe-na-conta-onboarded', '1')
@@ -1378,6 +1415,9 @@ function App() {
       'poe-na-conta-onboarded',
       'poe-na-conta-profile-name',
       'poe-na-conta-profile-photo',
+      'poe-na-conta-pix-key',
+      'poe-na-conta-last-card-id',
+      'poe-na-conta-page-size',
       'poe-na-conta-monthly-limit',
       'poe-na-conta-limit-notice-percent',
       'poe-na-conta-last-backup-at',
@@ -1393,6 +1433,8 @@ function App() {
     setStorageWarning('')
     setProfileName('')
     setProfilePhoto('')
+    setPixKey('')
+    setLastUsedCardId('')
     setProfileMessage('')
     setMonthlyLimit('')
     setLimitNoticePercent('80')
@@ -1534,12 +1576,13 @@ function App() {
     setReimbursementErrors({})
     const defaultUberCat =
       data.categories.find(c => c.id === 'cat-uber' || c.name.toLowerCase().includes('uber'))?.id || ''
+    const preferredCard = getPreferredCard()
     setReimbursementEditor({
       id: item?.id,
       description: item?.description || '',
       amount: item ? formatMoneyInput(item.amount) : '',
       participantId: item?.participantId || QUICK_THIRD_PARTY_ID,
-      cardId: item ? item.cardId || '' : data.cards[0]?.id || '',
+      cardId: item ? item.cardId || '' : preferredCard?.id || '',
       categoryId: item ? item.categoryId || '' : defaultUberCat,
     })
   }
@@ -1886,6 +1929,7 @@ function App() {
               profileName={profileName}
               profilePhoto={profilePhoto}
               profileMessage={profileMessage}
+              pixKey={pixKey}
               monthlyLimit={monthlyLimit}
               limitNoticePercent={limitNoticePercent}
               isStandalone={isStandalone}
@@ -1893,6 +1937,7 @@ function App() {
               changesSinceBackup={changesSinceBackup}
               storageWarning={storageWarning}
               onUpdateProfileName={updateProfileName}
+              onUpdatePixKey={updatePixKey}
               onPickProfilePhoto={() => profilePhotoInput.current?.click()}
               onRemoveProfilePhoto={removeProfilePhoto}
               onUpdateDefaultView={updateDefaultView}
@@ -1983,6 +2028,7 @@ function App() {
               onOpenNewExpenseModal={openNewExpenseModal}
               onOpenManualReimbursement={openManualReimbursement}
               onDeleteManualReimbursement={deleteManualReimbursement}
+              onOpenParticipantSummary={setParticipantSummaryTarget}
               onNavigateView={setView}
               personalValue={personalValue}
               owedBy={owedBy}
@@ -2132,8 +2178,11 @@ function App() {
                   onFocus={blurActiveInputOnTouch}
                   onChange={e => {
                     const nextMethod = e.target.value as Method
-                    const nextCardId = nextMethod.startsWith('Crédito') ? form.cardId || data.cards[0]?.id || '' : form.cardId
-                    const nextCard = data.cards.find(c => c.id === nextCardId) || data.cards[0]
+                    const fallbackCard = getPreferredCard()
+                    const nextCardId = nextMethod.startsWith('Crédito')
+                      ? (data.cards.some(c => c.id === form.cardId) ? form.cardId : fallbackCard?.id || '')
+                      : form.cardId
+                    const nextCard = data.cards.find(c => c.id === nextCardId) || fallbackCard
                     clearFieldError(setExpenseErrors, 'installments')
                     setForm({
                       ...form,
@@ -2156,10 +2205,11 @@ function App() {
                 <label>
                   Cartão
                   <select
-                    value={form.cardId || data.cards[0]?.id || ''}
+                    value={form.cardId || getPreferredCard()?.id || ''}
                     onFocus={blurActiveInputOnTouch}
                     onChange={e => {
-                      const nextCard = data.cards.find(c => c.id === e.target.value) || data.cards[0]
+                      const nextCard = data.cards.find(c => c.id === e.target.value) || getPreferredCard()
+                      rememberCard(e.target.value)
                       setForm({
                         ...form,
                         cardId: e.target.value,
@@ -3448,6 +3498,122 @@ function App() {
           </form>
         </div>
       )}
+
+      {participantSummaryTarget && (() => {
+        const expenseItems = currentExpenses.flatMap(e => {
+          const share = e.allocatedShares.find(s => s.participantId === participantSummaryTarget.id && s.amount > 0)
+          if (!share) return []
+          const shortDate = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(`${e.date}T12:00:00`)).replace('.', '')
+          return [
+            {
+              key: `${e.id}-${e.part}`,
+              description: e.description,
+              detail: `${shortDate} · ${e.installments > 1 ? `Parcela ${e.part}/${e.installments}` : e.method}`,
+              amount: share.amount,
+              labelForText: e.installments > 1 ? `${e.description} (Parcela ${e.part}/${e.installments})` : e.description,
+            },
+          ]
+        })
+        const manualItems = currentReimbursements
+          .filter(r => r.participantId === participantSummaryTarget.id && r.amount > 0)
+          .map(r => ({
+            key: r.id,
+            description: r.description,
+            detail: 'Abatimento avulso no mês',
+            amount: r.amount,
+            labelForText: r.description,
+          }))
+        const allSummaryItems = [...expenseItems, ...manualItems]
+        const summaryTotal = Math.round(allSummaryItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100
+        const itemClauses = allSummaryItems.map(item => `${money(item.amount)} por conta de ${item.labelForText}`).join(', ')
+        const trimmedPix = pixKey.trim()
+        const copyMessage = `O valor que você tem que me passar é ${itemClauses}. Totalizando: ${money(summaryTotal)}.${
+          trimmedPix ? ` Essa é minha chave PIX: ${trimmedPix}` : ''
+        }`
+
+        const closeParticipantSummary = () =>
+          closeModalWithAnimation('participant-summary', () => setParticipantSummaryTarget(null))
+
+        const handleCopySummary = async () => {
+          try {
+            await navigator.clipboard.writeText(copyMessage)
+            showToast('Resumo copiado para a área de transferência!')
+          } catch {
+            const textarea = document.createElement('textarea')
+            textarea.value = copyMessage
+            document.body.appendChild(textarea)
+            textarea.select()
+            document.execCommand('copy')
+            document.body.removeChild(textarea)
+            showToast('Resumo copiado para a área de transferência!')
+          }
+        }
+
+        return (
+          <div
+            className={`modal-backdrop ${closingModal === 'participant-summary' ? 'is-closing' : ''}`}
+            onMouseDown={event => {
+              if (event.target === event.currentTarget) closeParticipantSummary()
+            }}
+          >
+            <section
+              className="modal participant-summary-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="participant-summary-title"
+            >
+              <div className="modal-header">
+                <div>
+                  <span className="eyebrow">RESUMO DE REEMBOLSO ({monthName(month).toUpperCase()})</span>
+                  <h2 id="participant-summary-title">{participantSummaryTarget.name}</h2>
+                </div>
+                <button type="button" aria-label="Fechar resumo" onClick={closeParticipantSummary}>
+                  ×
+                </button>
+              </div>
+              <div className="participant-summary-items">
+                {allSummaryItems.map(item => (
+                  <div className="participant-summary-row" key={item.key}>
+                    <div>
+                      <b>{item.description}</b>
+                      <small>{item.detail}</small>
+                    </div>
+                    <strong>{money(item.amount)}</strong>
+                  </div>
+                ))}
+                <div className="participant-summary-total">
+                  <span>Total a receber neste mês</span>
+                  <b>{money(summaryTotal)}</b>
+                </div>
+              </div>
+              <div className="participant-summary-preview-box">
+                <span className="participant-summary-preview-label">Mensagem que será copiada:</span>
+                <p>{copyMessage}</p>
+                {!trimmedPix && (
+                  <button
+                    type="button"
+                    className="text-btn participant-summary-pix-link"
+                    onClick={() => {
+                      closeParticipantSummary()
+                      setView('Ajustes')
+                    }}
+                  >
+                    ＋ Cadastrar minha chave PIX nas Preferências para incluir no texto →
+                  </button>
+                )}
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="cancel-btn" onClick={closeParticipantSummary}>
+                  Fechar
+                </button>
+                <button type="button" className="primary" onClick={handleCopySummary}>
+                  Copiar resumo
+                </button>
+              </div>
+            </section>
+          </div>
+        )
+      })()}
 
       {pwaGuideOpen && (
         <div

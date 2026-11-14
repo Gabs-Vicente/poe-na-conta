@@ -56,6 +56,7 @@ export type BackupPreferences = {
   theme: 'light' | 'dark'
   profileName?: string
   profilePhoto?: string
+  pixKey?: string
 }
 export type BackupPayload = { data: Data; preferences?: BackupPreferences }
 
@@ -353,8 +354,19 @@ export const parseBackupFile = (raw: string): BackupPayload | null => {
     if (backup.version === 1) return { data }
     const preferences = backup.preferences
     const views = ['Visão geral', 'Lançamentos', 'Relatórios', 'Recorrências', 'Ajustes']
-    if (!isRecord(preferences) || !isText(preferences.monthlyLimit) || (preferences.monthlyLimit !== '' && (!Number.isFinite(Number(preferences.monthlyLimit)) || Number(preferences.monthlyLimit) < 0)) || !isText(preferences.limitNoticePercent) || !Number.isInteger(Number(preferences.limitNoticePercent)) || Number(preferences.limitNoticePercent) < 1 || Number(preferences.limitNoticePercent) > 100 || !views.includes(String(preferences.defaultView)) || (preferences.theme !== 'light' && preferences.theme !== 'dark') || (preferences.profileName !== undefined && !isText(preferences.profileName)) || (preferences.profilePhoto !== undefined && (!isText(preferences.profilePhoto) || preferences.profilePhoto.length > 3_000_000 || (preferences.profilePhoto !== '' && !/^data:image\/(png|jpeg|webp);base64,/.test(preferences.profilePhoto))))) return null
-    return { data, preferences: { monthlyLimit: preferences.monthlyLimit, limitNoticePercent: preferences.limitNoticePercent, defaultView: preferences.defaultView as BackupPreferences['defaultView'], theme: preferences.theme as BackupPreferences['theme'], profileName: isText(preferences.profileName) ? preferences.profileName : '', profilePhoto: isText(preferences.profilePhoto) ? preferences.profilePhoto : '' } }
+    if (!isRecord(preferences) || !isText(preferences.monthlyLimit) || (preferences.monthlyLimit !== '' && (!Number.isFinite(Number(preferences.monthlyLimit)) || Number(preferences.monthlyLimit) < 0)) || !isText(preferences.limitNoticePercent) || !Number.isInteger(Number(preferences.limitNoticePercent)) || Number(preferences.limitNoticePercent) < 1 || Number(preferences.limitNoticePercent) > 100 || !views.includes(String(preferences.defaultView)) || (preferences.theme !== 'light' && preferences.theme !== 'dark') || (preferences.profileName !== undefined && !isText(preferences.profileName)) || (preferences.pixKey !== undefined && !isText(preferences.pixKey)) || (preferences.profilePhoto !== undefined && (!isText(preferences.profilePhoto) || preferences.profilePhoto.length > 3_000_000 || (preferences.profilePhoto !== '' && !/^data:image\/(png|jpeg|webp);base64,/.test(preferences.profilePhoto))))) return null
+    return {
+      data,
+      preferences: {
+        monthlyLimit: preferences.monthlyLimit,
+        limitNoticePercent: preferences.limitNoticePercent,
+        defaultView: preferences.defaultView as BackupPreferences['defaultView'],
+        theme: preferences.theme as BackupPreferences['theme'],
+        profileName: isText(preferences.profileName) ? preferences.profileName : '',
+        profilePhoto: isText(preferences.profilePhoto) ? preferences.profilePhoto : '',
+        ...(isText(preferences.pixKey) ? { pixKey: preferences.pixKey } : {}),
+      },
+    }
   } catch {
     return null
   }

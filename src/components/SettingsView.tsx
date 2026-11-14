@@ -10,6 +10,7 @@ type SettingsViewProps = {
   profileName: string
   profilePhoto: string
   profileMessage: string
+  pixKey: string
   monthlyLimit: string
   limitNoticePercent: string
   isStandalone: boolean
@@ -17,6 +18,7 @@ type SettingsViewProps = {
   changesSinceBackup: number
   storageWarning: string
   onUpdateProfileName: (value: string) => void
+  onUpdatePixKey: (value: string) => void
   onPickProfilePhoto: () => void
   onRemoveProfilePhoto: () => void
   onUpdateDefaultView: (view: MainView) => void
@@ -44,6 +46,7 @@ export function SettingsView({
   profileName,
   profilePhoto,
   profileMessage,
+  pixKey,
   monthlyLimit,
   limitNoticePercent,
   isStandalone,
@@ -51,6 +54,7 @@ export function SettingsView({
   changesSinceBackup,
   storageWarning,
   onUpdateProfileName,
+  onUpdatePixKey,
   onPickProfilePhoto,
   onRemoveProfilePhoto,
   onUpdateDefaultView,
@@ -90,6 +94,21 @@ export function SettingsView({
           <label>
             Nome
             <input type="text" maxLength={60} placeholder="Seu nome" value={profileName} onChange={event => onUpdateProfileName(event.target.value)} />
+          </label>
+          <label className="pix-preference-label">
+            Sua chave PIX (opcional — usada ao copiar resumo de quem te deve)
+            <input
+              type="text"
+              maxLength={120}
+              enterKeyHint="done"
+              onKeyDown={dismissKeyboardOnEnter}
+              placeholder="Ex.: CPF, celular, e-mail ou chave aleatória"
+              value={pixKey}
+              onChange={event => onUpdatePixKey(event.target.value)}
+            />
+            <small className="pix-privacy-note">
+              🔒 Todos os dados (incluindo sua chave PIX) ficam salvos exclusivamente localmente no navegador deste dispositivo.
+            </small>
           </label>
           <div className="profile-photo-actions">
             <button type="button" className="outline-btn" onClick={onPickProfilePhoto}>

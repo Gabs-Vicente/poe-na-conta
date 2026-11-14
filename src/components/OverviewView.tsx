@@ -60,6 +60,7 @@ type OverviewViewProps = {
   onOpenNewExpenseModal: () => void
   onOpenManualReimbursement: (item?: ManualReimbursement) => void
   onDeleteManualReimbursement: (id: string) => void
+  onOpenParticipantSummary: (participant: Participant) => void
   onNavigateView: (view: MainView) => void
   personalValue: (occurrence: Occurrence) => number
   owedBy: (occurrence: Occurrence) => string
@@ -100,6 +101,7 @@ export function OverviewView({
   onOpenCardSettings,
   onOpenManualReimbursement,
   onDeleteManualReimbursement,
+  onOpenParticipantSummary,
   personalValue,
   owedBy,
 }: OverviewViewProps) {
@@ -482,6 +484,15 @@ export function OverviewView({
                   <div className="reimbursement-values">
                     <span>Neste mês <b>{money(thisMonth)}</b></span>
                     <span>Parcelas futuras <b>{money(future)}</b></span>
+                    {thisMonth > 0 && (
+                      <button
+                        type="button"
+                        className="reimbursement-summary-btn"
+                        onClick={() => onOpenParticipantSummary(participant)}
+                      >
+                        Ver resumo
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

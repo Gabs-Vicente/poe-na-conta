@@ -193,28 +193,74 @@ export function OverviewView({
             <span className="calendar-icon">✳</span>
           </div>
           {categoryTotals.length ? (
-            <>
-              <div className="insight-number">
-                {categoryTotals[0].name}
-                <small>é sua maior categoria</small>
-              </div>
-              <p className="insight-copy">
-                Ela representa <b>{total ? Math.round(categoryTotals[0].total / total * 100) : 0}%</b> dos gastos previstos no período.
-              </p>
-              <div className="track insight-track">
-                <i style={{ width: `${total ? categoryTotals[0].total / total * 100 : 0}%`, background: categoryTotals[0].color }} />
-              </div>
-              <div className="health-callout">
-                <span>↗</span>
-                <p>
-                  {monthChange === null
-                    ? 'Registre seus gastos mês a mês para criar uma comparação.'
-                    : monthChange > 0
-                      ? `Os gastos previstos subiram ${Math.abs(monthChange).toFixed(0)}% frente ao mês anterior.`
-                      : `Os gastos previstos caíram ${Math.abs(monthChange).toFixed(0)}% frente ao mês anterior.`}
-                </p>
-              </div>
-            </>
+            (() => {
+              const topCategory = categoryTotals[0]
+              const topSharePercent = total ? Math.round((topCategory.total / total) * 100) : 0
+              const topCategoryExpenses = currentExpenses
+                .filter(e => e.category === topCategory.id && personalValue(e) > 0)
+                .sort((a, b) => personalValue(b) - personalValue(a))
+                .slice(0, 3)
+              return (
+                <>
+                  <div className="insight-top-category">
+                    <span
+                      className="category-icon insight-category-icon"
+                      style={{ color: topCategory.color, background: `${topCategory.color}22` }}
+                    >
+                      {categorySymbol(topCategory.id, topCategory.name)}
+                    </span>
+                    <div className="insight-number">
+                      <div className="insight-title-row">
+                        <span>{topCategory.name}</span>
+                        <b className="insight-cat-amount">{money(topCategory.total)}</b>
+                      </div>
+                      <small>é sua maior categoria ({topSharePercent}% dos gastos pessoais)</small>
+                    </div>
+                  </div>
+                  <div className="track insight-track">
+                    <i style={{ width: `${Math.min(100, topSharePercent)}%`, background: topCategory.color }} />
+                  </div>
+                  {topCategoryExpenses.length > 0 && (
+                    <div className="insight-top-expenses">
+                      <span className="insight-top-expenses-title">
+                        Top {topCategoryExpenses.length} {topCategoryExpenses.length === 1 ? 'maior gasto' : 'maiores gastos'} em {topCategory.name}
+                      </span>
+                      <div className="insight-top-expenses-list">
+                        {topCategoryExpenses.map((item, idx) => (
+                          <div className="insight-top-expense-row" key={`${item.id}-${item.part}`}>
+                            <span
+                              className="insight-rank-badge"
+                              style={{ color: topCategory.color, background: `${topCategory.color}20` }}
+                            >
+                              {idx + 1}º
+                            </span>
+                            <div className="insight-expense-desc">
+                              <b>{item.description}</b>
+                              {item.installments > 1 && (
+                                <small>
+                                  Parcela {item.part}/{item.installments}
+                                </small>
+                              )}
+                            </div>
+                            <strong className="insight-expense-val">{money(personalValue(item))}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="health-callout">
+                    <span>↗</span>
+                    <p>
+                      {monthChange === null
+                        ? 'Registre seus gastos mês a mês para criar uma comparação.'
+                        : monthChange > 0
+                          ? `Os gastos previstos subiram ${Math.abs(monthChange).toFixed(0)}% frente ao mês anterior.`
+                          : `Os gastos previstos caíram ${Math.abs(monthChange).toFixed(0)}% frente ao mês anterior.`}
+                    </p>
+                  </div>
+                </>
+              )
+            })()
           ) : (
             <div className="empty">Adicione lançamentos para ver os indicadores do mês.</div>
           )}

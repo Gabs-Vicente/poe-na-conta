@@ -1,6 +1,9 @@
+import { useState } from 'react'
 import type React from 'react'
 import { type Data, type Expense, type Occurrence } from '../finance'
-import { categorySymbol, money, type MainView, type SortOrder } from '../utils/format'
+import { blurActiveInputOnTouch, categorySymbol, money, type MainView, type SortOrder } from '../utils/format'
+
+type PageSizeOption = '10' | '20' | '50' | 'all'
 
 type TransactionsTableProps = {
   view: MainView
@@ -77,12 +80,37 @@ export function TransactionsTable({
   personalValue,
   owedBy,
 }: TransactionsTableProps) {
+  const [pageSize, setPageSize] = useState<PageSizeOption>(() => {
+    const saved = localStorage.getItem('poe-na-conta-page-size')
+    return saved === '10' || saved === '20' || saved === '50' || saved === 'all' ? saved : '10'
+  })
+  const [page, setPage] = useState(1)
+
+  const handlePageSizeChange = (next: PageSizeOption) => {
+    setPageSize(next)
+    setPage(1)
+    try {
+      localStorage.setItem('poe-na-conta-page-size', next)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const numericPageSize = pageSize === 'all' ? Math.max(1, filtered.length) : Number(pageSize)
+  const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(filtered.length / numericPageSize))
+  const safePage = Math.min(Math.max(1, page), totalPages)
+  const startIndex = pageSize === 'all' ? 0 : (safePage - 1) * numericPageSize
+  const paginated = pageSize === 'all' ? filtered : filtered.slice(startIndex, startIndex + numericPageSize)
+  const rangeStart = filtered.length === 0 ? 0 : startIndex + 1
+  const rangeEnd = filtered.length === 0 ? 0 : startIndex + paginated.length
+
   const closeActionMenu = (event: React.MouseEvent<HTMLButtonElement>, action: () => void) => {
     event.currentTarget.closest('details')?.removeAttribute('open')
     action()
   }
 
   const toggleColumnSort = (column: 'desc' | 'date' | 'value') => {
+    setPage(1)
     if (column === 'date') {
       onSortOrderChange(sortOrder === 'date-desc' ? 'date-asc' : 'date-desc')
     } else if (column === 'value') {
@@ -104,31 +132,60 @@ export function TransactionsTable({
         </button>
       </div>
       <div className="data-summary">
-        <div>
-          <span>Gastos pessoais{hasActiveFilters ? ' (filtro)' : ''}</span>
-          <b>{money(hasActiveFilters ? filteredPersonalTotal : total)}</b>
-        </div>
-        <div>
-          <span>A receber{hasActiveFilters ? ' (filtro)' : ''}</span>
-          <b>{money(hasActiveFilters ? filteredReimbursementTotal : reimbursementTotal)}</b>
-        </div>
-        {(cardFilter !== 'Todos os cartões' || methodFilter.startsWith('Crédito')) && (
-          <div>
-            <span>Total na fatura</span>
-            <b>{money(filteredInvoiceTotal)}</b>
+        <div className="data-summary-card is-primary">
+          <div className="data-summary-head">
+            <span>Gastos pessoais{hasActiveFilters ? ' (filtro)' : ''}</span>
+            <i className="data-summary-icon" aria-hidden="true">↘</i>
           </div>
-        )}
-        <div>
-          <span>Lançamentos</span>
+          <b>{money(hasActiveFilters ? filteredPersonalTotal : total)}</b>
+          <small>{hasActiveFilters ? 'Sua parte nos itens filtrados' : 'Sua parte líquida no mês'}</small>
+        </div>
+        <div className="data-summary-card">
+          <div className="data-summary-head">
+            <span>A receber{hasActiveFilters ? ' (filtro)' : ''}</span>
+            <i className="data-summary-icon is-orange" aria-hidden="true">＋</i>
+          </div>
+          <b>{money(hasActiveFilters ? filteredReimbursementTotal : reimbursementTotal)}</b>
+          <small>Parte atribuída a terceiros</small>
+        </div>
+        <div className="data-summary-card">
+          <div className="data-summary-head">
+            <span>{cardFilter !== 'Todos os cartões' || methodFilter.startsWith('Crédito') ? 'Total na fatura' : 'Total movimentado'}</span>
+            <i className="data-summary-icon is-blue" aria-hidden="true">◫</i>
+          </div>
+          <b>{money(filteredInvoiceTotal)}</b>
+          <small>{cardFilter !== 'Todos os cartões' || methodFilter.startsWith('Crédito') ? 'Soma bruta das parcelas no cartão' : 'Valor bruto (você + terceiros)'}</small>
+        </div>
+        <div className="data-summary-card">
+          <div className="data-summary-head">
+            <span>Lançamentos</span>
+            <i className="data-summary-icon is-purple" aria-hidden="true">#</i>
+          </div>
           <b>{hasActiveFilters ? `${filtered.length} de ${current.length}` : current.length}</b>
+          <small>{hasActiveFilters ? 'Filtrados neste período' : current.length === 1 ? 'Despesa registrada no mês' : 'Despesas registradas no mês'}</small>
         </div>
       </div>
       <div className="filters">
         <label className="search">
           <span>⌕</span>
-          <input aria-label="Buscar lançamentos" placeholder="Buscar lançamento..." value={query} onChange={e => onQueryChange(e.target.value)} />
+          <input
+            aria-label="Buscar lançamentos"
+            placeholder="Buscar lançamento..."
+            value={query}
+            onChange={e => {
+              setPage(1)
+              onQueryChange(e.target.value)
+            }}
+          />
         </label>
-        <select aria-label="Filtrar por categoria" value={categoryFilter} onChange={e => onCategoryFilterChange(e.target.value)}>
+        <select
+          aria-label="Filtrar por categoria"
+          value={categoryFilter}
+          onChange={e => {
+            setPage(1)
+            onCategoryFilterChange(e.target.value)
+          }}
+        >
           <option>Todas as categorias</option>
           {data.categories.map(c => (
             <option key={c.id} value={c.id}>{c.name}</option>
@@ -139,6 +196,7 @@ export function TransactionsTable({
           value={methodFilter}
           onChange={e => {
             const next = e.target.value
+            setPage(1)
             onMethodFilterChange(next)
             if (next === 'PIX' || next === 'Débito' || next === 'Dinheiro') onCardFilterChange('Todos os cartões')
           }}
@@ -157,6 +215,7 @@ export function TransactionsTable({
             value={cardFilter}
             onChange={e => {
               const next = e.target.value
+              setPage(1)
               onCardFilterChange(next)
               if (next !== 'Todos os cartões' && (methodFilter === 'PIX' || methodFilter === 'Débito' || methodFilter === 'Dinheiro')) {
                 onMethodFilterChange('Todos os pagamentos')
@@ -169,7 +228,14 @@ export function TransactionsTable({
             ))}
           </select>
         )}
-        <select aria-label="Ordenar lançamentos" value={sortOrder} onChange={e => onSortOrderChange(e.target.value as SortOrder)}>
+        <select
+          aria-label="Ordenar lançamentos"
+          value={sortOrder}
+          onChange={e => {
+            setPage(1)
+            onSortOrderChange(e.target.value as SortOrder)
+          }}
+        >
           <option value="date-desc">Ordenar: Mais recentes</option>
           <option value="date-asc">Ordenar: Mais antigos</option>
           <option value="value-desc">Ordenar: Maior valor</option>
@@ -177,7 +243,14 @@ export function TransactionsTable({
           <option value="desc-asc">Ordenar: Descrição (A–Z)</option>
         </select>
         {(hasActiveFilters || sortOrder !== 'date-desc') && (
-          <button type="button" className="cancel-btn filter-clear-btn" onClick={onClearAllFilters}>
+          <button
+            type="button"
+            className="cancel-btn filter-clear-btn"
+            onClick={() => {
+              setPage(1)
+              onClearAllFilters()
+            }}
+          >
             Limpar filtros
           </button>
         )}
@@ -232,7 +305,7 @@ export function TransactionsTable({
             </tr>
           </thead>
           <tbody>
-            {filtered.map(e => {
+            {paginated.map(e => {
               const cat = data.categories.find(c => c.id === e.category)
               const txCard = e.method.startsWith('Crédito') ? (data.cards.find(c => c.id === e.cardId) || data.cards[0]) : undefined
               const own = personalValue(e)
@@ -303,10 +376,70 @@ export function TransactionsTable({
         {!filtered.length && <div className="empty">Nenhum lançamento encontrado neste mês.</div>}
       </div>
       <div className="table-foot">
-        <span>
-          Mostrando <b>{filtered.length}</b> de <b>{current.length}</b> lançamentos
-        </span>
-        <span>
+        <div className="table-foot-left">
+          <span>
+            {filtered.length > 0 ? (
+              <>
+                Exibindo <b>{rangeStart}–{rangeEnd}</b> de <b>{filtered.length}</b>
+                {hasActiveFilters ? ` (total: ${current.length})` : ' lançamentos'}
+              </>
+            ) : (
+              <>
+                Mostrando <b>0</b> de <b>{current.length}</b> lançamentos
+              </>
+            )}
+          </span>
+          <label className="page-size-control">
+            <span>Por página:</span>
+            <select
+              aria-label="Quantidade de lançamentos por página"
+              value={pageSize}
+              onFocus={blurActiveInputOnTouch}
+              onChange={e => handlePageSizeChange(e.target.value as PageSizeOption)}
+            >
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="all">Todos</option>
+            </select>
+          </label>
+        </div>
+        {totalPages > 1 && (
+          <div className="pagination-controls" role="navigation" aria-label="Paginação de lançamentos" data-no-swipe="true">
+            <button
+              type="button"
+              className="page-nav-btn"
+              disabled={safePage <= 1}
+              onClick={() => setPage(Math.max(1, safePage - 1))}
+              aria-label="Página anterior"
+            >
+              ‹ Anterior
+            </button>
+            <div className="page-numbers">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNumber => (
+                <button
+                  key={pageNumber}
+                  type="button"
+                  className={`page-num-btn ${pageNumber === safePage ? 'is-active' : ''}`}
+                  aria-current={pageNumber === safePage ? 'page' : undefined}
+                  onClick={() => setPage(pageNumber)}
+                >
+                  {pageNumber}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="page-nav-btn"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+              aria-label="Próxima página"
+            >
+              Próxima ›
+            </button>
+          </div>
+        )}
+        <span className="table-foot-totals">
           Gastos pessoais <b>{money(hasActiveFilters ? filteredPersonalTotal : total)}</b> · A receber <b>{money(hasActiveFilters ? filteredReimbursementTotal : reimbursementTotal)}</b>
         </span>
       </div>

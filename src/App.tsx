@@ -244,6 +244,9 @@ function App() {
   const [settingsErrors, setSettingsErrors] = useState<Record<string, string>>({})
   const [formShake, setFormShake] = useState<ModalKind | null>(null)
   const [returnToExpenseAfterParticipant, setReturnToExpenseAfterParticipant] = useState(false)
+  const [participantsSectionOpen, setParticipantsSectionOpen] = useState(false)
+  const [keepExpenseModalOpen, setKeepExpenseModalOpen] = useState(false)
+  const expenseDescInputRef = useRef<HTMLInputElement>(null)
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null)
   const swipeStartRef = useRef<{ x: number; y: number; time: number; blocked: boolean } | null>(null)
 
@@ -405,6 +408,7 @@ function App() {
     setEditingExpenseId(null)
     setShareError('')
     setExpenseErrors({})
+    setParticipantsSectionOpen(false)
     setForm({
       description: '',
       amount: '',
@@ -1026,6 +1030,9 @@ function App() {
       }
     }
     if (Object.keys(nextErrors).length > 0) {
+      if (Object.keys(nextErrors).some(key => key.startsWith('share-'))) {
+        setParticipantsSectionOpen(true)
+      }
       setExpenseErrors(nextErrors)
       setShareError('')
       triggerFormShake('expense')
@@ -1045,6 +1052,7 @@ function App() {
     for (const share of shares) {
       const cents = Math.round(share.amount * 100)
       if (share.installment && share.installment > count) {
+        setParticipantsSectionOpen(true)
         setShareError('Uma atribuição aponta para uma parcela que não existe. Ajuste o número de parcelas ou a seleção.')
         triggerFormShake('expense')
         return
@@ -1053,6 +1061,7 @@ function App() {
       else for (let i = 0; i < count; i++) allocated[i] += Math.floor(cents / count) + (i < cents % count ? 1 : 0)
     }
     if (allocated.some((cents, i) => cents > partValues[i])) {
+      setParticipantsSectionOpen(true)
       setShareError('A soma atribuída aos participantes não pode superar o valor da parcela correspondente.')
       triggerFormShake('expense')
       return
@@ -1076,6 +1085,32 @@ function App() {
       shares,
     }
     if (!save({ ...data, expenses: editingExpenseId ? data.expenses.map(e => (e.id === editingExpenseId ? entry : e)) : [entry, ...data.expenses] })) return
+    const nextCard = card || data.cards[0]
+    if (!editingExpenseId && keepExpenseModalOpen) {
+      if (firstMonth !== month) {
+        showToast(`Lançamento salvo em ${monthName(firstMonth)}. Pronto para o próximo!`)
+      } else {
+        showToast('Lançamento adicionado! Pronto para o próximo.')
+      }
+      setShareError('')
+      setExpenseErrors({})
+      setParticipantsSectionOpen(false)
+      setForm({
+        ...form,
+        description: '',
+        amount: '',
+        date: normalizedDate,
+        category: entry.category,
+        cardId: nextCard?.id || '',
+        installments: '2',
+        afterClosing: (nextCard?.closingDayRule ?? 'after') !== 'before',
+        shares: [],
+      })
+      if (!isTouchDevice()) {
+        window.requestAnimationFrame(() => expenseDescInputRef.current?.focus())
+      }
+      return
+    }
     if (editingExpenseId) {
       showToast('Alterações salvas no lançamento.')
     } else if (firstMonth !== month) {
@@ -1088,7 +1123,6 @@ function App() {
       setEditingExpenseId(null)
       setShareError('')
       setExpenseErrors({})
-      const nextCard = card || data.cards[0]
       setForm({
         ...form,
         description: '',
@@ -1105,7 +1139,9 @@ function App() {
 
   const editExpense = (expense: Expense) => {
     const expenseCard = data.cards.find(c => c.id === expense.cardId) || data.cards[0]
+    const hasShares = (expense.shares || []).length > 0
     setEditingExpenseId(expense.id)
+    setParticipantsSectionOpen(hasShares)
     setForm({
       description: expense.description,
       amount: formatMoneyInput(expense.amount),
@@ -1128,7 +1164,9 @@ function App() {
 
   const duplicateExpense = (expense: Expense) => {
     const expenseCard = data.cards.find(c => c.id === expense.cardId) || data.cards[0]
+    const hasShares = (expense.shares || []).length > 0
     setEditingExpenseId(null)
+    setParticipantsSectionOpen(hasShares)
     setForm({
       description: expense.description,
       amount: formatMoneyInput(expense.amount),
@@ -1417,6 +1455,7 @@ function App() {
     })
   }
   const addParticipantFromExpense = () => {
+    setParticipantsSectionOpen(true)
     setReturnToExpenseAfterParticipant(true)
     closeModalWithAnimation('expense', () => {
       setModal(false)
@@ -2013,6 +2052,7 @@ function App() {
             <label className={expenseErrors.description ? 'is-invalid' : ''}>
               Descrição
               <input
+                ref={expenseDescInputRef}
                 autoFocus={!isTouchDevice()}
                 enterKeyHint="done"
                 onKeyDown={dismissKeyboardOnEnter}
@@ -2186,10 +2226,37 @@ function App() {
                 )}
               </label>
             )}
-            <fieldset className="participants-field">
-              <legend>Alguém precisa te pagar?</legend>
-              <p>Use o <b>Modo rápido</b> para dividir corridas/contas sem cadastrar ninguém ou selecione pessoas abaixo.</p>
-              {(() => {
+            <fieldset className={`participants-field ${participantsSectionOpen ? 'is-open' : 'is-collapsed'}`}>
+              <button
+                type="button"
+                className="participants-collapse-toggle"
+                aria-expanded={participantsSectionOpen}
+                onClick={() => {
+                  blurActiveInputOnTouch()
+                  setParticipantsSectionOpen(current => !current)
+                }}
+              >
+                <div className="participants-collapse-title">
+                  <b>Alguém precisa te pagar?</b>
+                  {form.shares.length > 0 ? (
+                    <span className="participants-active-badge">
+                      {form.shares.length === 1 ? '1 divisão ativa' : `${form.shares.length} divisões ativas`}
+                      {totalFormSharesAmount > 0 ? ` · ${money(totalFormSharesAmount)}` : ''}
+                    </span>
+                  ) : (
+                    <small>Opcional · toque para dividir conta ou cobrar terceiros</small>
+                  )}
+                </div>
+                <span className={`participants-chevron ${participantsSectionOpen ? 'is-open' : ''}`} aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </span>
+              </button>
+              {participantsSectionOpen && (
+                <div className="participants-collapsible-body">
+                  <p>Use o <b>Modo rápido</b> para dividir corridas/contas sem cadastrar ninguém ou selecione pessoas abaixo.</p>
+                  {(() => {
                 const quickShare = form.shares.find(item => item.participantId === QUICK_THIRD_PARTY_ID)
                 const quickErrorKey = `share-${QUICK_THIRD_PARTY_ID}`
                 const quickError = expenseErrors[quickErrorKey]
@@ -2416,13 +2483,28 @@ function App() {
                   {shareError}
                 </div>
               )}
+                </div>
+              )}
             </fieldset>
+            {!editingExpenseId && (
+              <label className="keep-modal-open-check">
+                <input
+                  type="checkbox"
+                  checked={keepExpenseModalOpen}
+                  onChange={e => {
+                    blurActiveInputOnTouch()
+                    setKeepExpenseModalOpen(e.target.checked)
+                  }}
+                />
+                <span>Continuar adicionando outra despesa após salvar</span>
+              </label>
+            )}
             <div className="modal-actions">
               <button type="button" className="cancel-btn" onClick={closeExpenseModal}>
                 Cancelar
               </button>
               <button className="primary" type="submit">
-                {editingExpenseId ? 'Salvar alterações' : 'Salvar lançamento'}
+                {editingExpenseId ? 'Salvar alterações' : keepExpenseModalOpen ? 'Salvar e adicionar outra' : 'Salvar lançamento'}
               </button>
             </div>
           </form>

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type React from 'react'
 import { formatMoneyInput, parseMoneyInput, type Card, type Category, type Data, type Participant } from '../finance'
 import { categorySymbol, dismissKeyboardOnEnter } from '../utils/format'
@@ -69,6 +70,8 @@ export function SettingsView({
   onDownloadCsv,
   onOpenResetDataModal,
 }: SettingsViewProps) {
+  const [cardsExpanded, setCardsExpanded] = useState(false)
+  const [participantsExpanded, setParticipantsExpanded] = useState(false)
   const closeActionMenu = (event: React.MouseEvent<HTMLButtonElement>, action: () => void) => {
     event.currentTarget.closest('details')?.removeAttribute('open')
     action()
@@ -215,7 +218,7 @@ export function SettingsView({
           </div>
         ))}
       </div>
-      <div className={`panel settings-panel hover-expand-panel ${data.cards.length > 3 ? 'has-more' : ''}`}>
+      <div className={`panel settings-panel hover-expand-panel ${data.cards.length > 3 ? 'has-more' : ''} ${cardsExpanded ? 'is-expanded' : ''}`}>
         <div className="panel-head">
           <div>
             <h2>Cartões</h2>
@@ -250,12 +253,22 @@ export function SettingsView({
           ))}
         </div>
         {data.cards.length > 3 && (
-          <div className="hover-expand-hint">
-            Mostrando 3 de {data.cards.length} · passe o mouse para ver todos
+          <div className="hover-expand-footer">
+            <div className="hover-expand-hint">
+              Mostrando 3 de {data.cards.length} · passe o mouse para ver todos
+            </div>
+            <button
+              type="button"
+              className="hover-expand-toggle"
+              aria-expanded={cardsExpanded}
+              onClick={() => setCardsExpanded(prev => !prev)}
+            >
+              {cardsExpanded ? 'Minimizar lista' : `Mostrar todos (${data.cards.length})`}
+            </button>
           </div>
         )}
       </div>
-      <div className={`panel settings-panel hover-expand-panel ${(data.participants || []).length > 3 ? 'has-more' : ''}`}>
+      <div className={`panel settings-panel hover-expand-panel ${(data.participants || []).length > 3 ? 'has-more' : ''} ${participantsExpanded ? 'is-expanded' : ''}`}>
         <div className="panel-head">
           <div>
             <h2>Participantes</h2>
@@ -285,8 +298,18 @@ export function SettingsView({
               ))}
             </div>
             {(data.participants || []).length > 3 && (
-              <div className="hover-expand-hint">
-                Mostrando 3 de {(data.participants || []).length} · passe o mouse para ver todos
+              <div className="hover-expand-footer">
+                <div className="hover-expand-hint">
+                  Mostrando 3 de {(data.participants || []).length} · passe o mouse para ver todos
+                </div>
+                <button
+                  type="button"
+                  className="hover-expand-toggle"
+                  aria-expanded={participantsExpanded}
+                  onClick={() => setParticipantsExpanded(prev => !prev)}
+                >
+                  {participantsExpanded ? 'Minimizar lista' : `Mostrar todos (${(data.participants || []).length})`}
+                </button>
               </div>
             )}
           </>
@@ -296,7 +319,10 @@ export function SettingsView({
       </div>
       <div className="panel backup">
         <h2>Seus dados</h2>
-        <p>Os lançamentos ficam salvos localmente neste navegador. Baixe um backup completo para preservar categorias, cartões, participantes e despesas.</p>
+        <p>Os lançamentos, investimentos e metas ficam salvos localmente apenas neste navegador. Baixe um backup completo para preservar seu histórico.</p>
+        <div className="local-data-notice" role="note">
+          ⚠ <span>Atenção: limpar os dados ou cache do navegador, formatar o aparelho ou usar guia anônima apaga tudo permanentemente se você não tiver um backup <b>.json</b> salvo.</span>
+        </div>
         <div className="backup-status-row">
           <span>
             {lastBackupAt

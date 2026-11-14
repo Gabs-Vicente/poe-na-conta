@@ -983,6 +983,51 @@ function App() {
     localStorage.setItem('poe-na-conta-overview-mode', overviewMode)
   }, [overviewMode])
 
+  useEffect(() => {
+    const handleImportedText = (rawText: string) => {
+      const parsed = parseBackupFile(rawText)
+      if (!parsed) {
+        showToast('O arquivo .json aberto não é um backup válido do Põe na Conta.')
+        return
+      }
+      setPendingBackupImport(parsed)
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('shared-backup') === '1' && 'caches' in window) {
+      params.delete('shared-backup')
+      const nextSearch = params.toString()
+      window.history.replaceState(null, '', `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`)
+      void (async () => {
+        try {
+          const shareCache = await caches.open('poe-na-conta-share-v1')
+          const match = await shareCache.match('./__shared-backup__.json')
+          if (!match) return
+          const text = await match.text()
+          await shareCache.delete('./__shared-backup__.json')
+          if (text) handleImportedText(text)
+        } catch {
+          showToast('Não foi possível ler o arquivo compartilhado.')
+        }
+      })()
+    }
+
+    const win = window as Window & {
+      launchQueue?: {
+        setConsumer: (consumer: (launchParams: { files?: Array<{ getFile: () => Promise<File> }> }) => void) => void
+      }
+    }
+    if (win.launchQueue?.setConsumer) {
+      win.launchQueue.setConsumer(launchParams => {
+        const firstFile = launchParams.files?.[0]
+        if (!firstFile) return
+        void firstFile.getFile().then(file => file.text()).then(handleImportedText).catch(() => {
+          showToast('Não foi possível abrir o arquivo .json selecionado.')
+        })
+      })
+    }
+  }, [])
+
   const updateDefaultTheme = (next: 'light' | 'dark') => {
     setDefaultTheme(next)
     setTheme(next)

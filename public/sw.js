@@ -1,4 +1,6 @@
-const CACHE_NAME = 'poe-na-conta-pwa-v2'
+const CACHE_NAME = 'poe-na-conta-pwa-v3'
+const SHARE_CACHE_NAME = 'poe-na-conta-share-v1'
+const SHARE_TARGET_KEY = './__shared-backup__.json'
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -18,16 +20,44 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))),
+      Promise.all(keys.filter(key => key !== CACHE_NAME && key !== SHARE_CACHE_NAME).map(key => caches.delete(key))),
     ).then(() => self.clients.claim()),
   )
 })
 
 self.addEventListener('fetch', event => {
   const { request } = event
-  if (request.method !== 'GET') return
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+
+  if (request.method === 'POST' && url.pathname.endsWith('/share-backup')) {
+    event.respondWith((async () => {
+      try {
+        const formData = await request.formData()
+        const file = formData.get('backup')
+        let jsonText = ''
+        if (file && typeof file.text === 'function') {
+          jsonText = await file.text()
+        } else {
+          const textField = formData.get('text')
+          if (typeof textField === 'string') jsonText = textField
+        }
+        if (jsonText) {
+          const shareCache = await caches.open(SHARE_CACHE_NAME)
+          await shareCache.put(
+            SHARE_TARGET_KEY,
+            new Response(jsonText, { headers: { 'Content-Type': 'application/json;charset=utf-8' } }),
+          )
+        }
+      } catch {
+        // Ignora erro de leitura e redireciona para o app
+      }
+      return Response.redirect('./?shared-backup=1', 303)
+    })())
+    return
+  }
+
+  if (request.method !== 'GET') return
 
   if (request.mode === 'navigate') {
     event.respondWith(

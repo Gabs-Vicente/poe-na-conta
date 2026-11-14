@@ -1,11 +1,10 @@
 import type React from 'react'
 import { formatMoneyInput, parseMoneyInput, type Card, type Category, type Data, type Participant } from '../finance'
-import { categorySymbol, dismissKeyboardOnEnter, type MainView } from '../utils/format'
+import { categorySymbol, dismissKeyboardOnEnter } from '../utils/format'
 
 type SettingsViewProps = {
   data: Data
   theme: 'light' | 'dark'
-  defaultView: MainView
   defaultTheme: 'light' | 'dark'
   profileName: string
   profilePhoto: string
@@ -21,7 +20,6 @@ type SettingsViewProps = {
   onUpdatePixKey: (value: string) => void
   onPickProfilePhoto: () => void
   onRemoveProfilePhoto: () => void
-  onUpdateDefaultView: (view: MainView) => void
   onUpdateDefaultTheme: (theme: 'light' | 'dark') => void
   onUpdateMonthlyLimit: (value: string) => void
   onUpdateLimitNoticePercent: (value: string) => void
@@ -41,7 +39,6 @@ type SettingsViewProps = {
 export function SettingsView({
   data,
   theme,
-  defaultView,
   defaultTheme,
   profileName,
   profilePhoto,
@@ -57,7 +54,6 @@ export function SettingsView({
   onUpdatePixKey,
   onPickProfilePhoto,
   onRemoveProfilePhoto,
-  onUpdateDefaultView,
   onUpdateDefaultTheme,
   onUpdateMonthlyLimit,
   onUpdateLimitNoticePercent,
@@ -127,17 +123,6 @@ export function SettingsView({
           )}
         </div>
         <div className="preference-controls">
-          <label>
-            Tela ao abrir
-            <select value={defaultView} onChange={event => onUpdateDefaultView(event.target.value as MainView)}>
-              <option>Visão geral</option>
-              <option>Lançamentos</option>
-              <option>Relatórios</option>
-              <option>Investimentos</option>
-              <option>Recorrências</option>
-              <option>Ajustes</option>
-            </select>
-          </label>
           <label>
             Tema padrão
             <select value={defaultTheme} onChange={event => onUpdateDefaultTheme(event.target.value as 'light' | 'dark')}>
@@ -230,7 +215,7 @@ export function SettingsView({
           </div>
         ))}
       </div>
-      <div className="panel settings-panel">
+      <div className={`panel settings-panel hover-expand-panel ${data.cards.length > 3 ? 'has-more' : ''}`}>
         <div className="panel-head">
           <div>
             <h2>Cartões</h2>
@@ -240,30 +225,37 @@ export function SettingsView({
             ＋ Novo cartão
           </button>
         </div>
-        {data.cards.map(c => (
-          <div className="setting-row" key={c.id}>
-            <span className="card-icon">{c.kind === 'store' ? '🛍️' : c.kind === 'borrowed' ? '🤝' : '🏦'}</span>
-            <b>{c.name}</b>
-            <span className="card-days">
-              {c.kind === 'store'
-                ? 'Crédito de loja · Mês definido na compra'
-                : c.kind === 'borrowed'
-                  ? 'Cartão emprestado · Mês definido na compra'
-                  : `Fecha dia ${c.closingDay} · Vence dia ${c.dueDay}`}
-            </span>
-            <details className="row-actions">
-              <summary aria-label={`Ações para o cartão ${c.name}`} title="Ações">···</summary>
-              <div className={`row-action-menu ${theme === 'dark' ? 'is-dark' : 'is-light'}`}>
-                <button onClick={event => closeActionMenu(event, () => onOpenCard(c))}>Editar</button>
-                <button className="danger" onClick={event => closeActionMenu(event, () => onRemoveCard(c.id))}>
-                  Remover
-                </button>
-              </div>
-            </details>
+        <div className="hover-expand-list">
+          {data.cards.map(c => (
+            <div className="setting-row" key={c.id}>
+              <span className="card-icon">{c.kind === 'store' ? '🛍️' : c.kind === 'borrowed' ? '🤝' : '🏦'}</span>
+              <b>{c.name}</b>
+              <span className="card-days">
+                {c.kind === 'store'
+                  ? 'Crédito de loja · Mês definido na compra'
+                  : c.kind === 'borrowed'
+                    ? 'Cartão emprestado · Mês definido na compra'
+                    : `Fecha dia ${c.closingDay} · Vence dia ${c.dueDay}`}
+              </span>
+              <details className="row-actions">
+                <summary aria-label={`Ações para o cartão ${c.name}`} title="Ações">···</summary>
+                <div className={`row-action-menu ${theme === 'dark' ? 'is-dark' : 'is-light'}`}>
+                  <button onClick={event => closeActionMenu(event, () => onOpenCard(c))}>Editar</button>
+                  <button className="danger" onClick={event => closeActionMenu(event, () => onRemoveCard(c.id))}>
+                    Remover
+                  </button>
+                </div>
+              </details>
+            </div>
+          ))}
+        </div>
+        {data.cards.length > 3 && (
+          <div className="hover-expand-hint">
+            Mostrando 3 de {data.cards.length} · passe o mouse para ver todos
           </div>
-        ))}
+        )}
       </div>
-      <div className="panel settings-panel">
+      <div className={`panel settings-panel hover-expand-panel ${(data.participants || []).length > 3 ? 'has-more' : ''}`}>
         <div className="panel-head">
           <div>
             <h2>Participantes</h2>
@@ -274,21 +266,30 @@ export function SettingsView({
           </button>
         </div>
         {(data.participants || []).length ? (
-          (data.participants || []).map(participant => (
-            <div className="setting-row" key={participant.id}>
-              <span className="participant-avatar">{participant.name.slice(0, 1).toUpperCase()}</span>
-              <b>{participant.name}</b>
-              <details className="row-actions">
-                <summary aria-label={`Ações para ${participant.name}`} title="Ações">···</summary>
-                <div className={`row-action-menu ${theme === 'dark' ? 'is-dark' : 'is-light'}`}>
-                  <button onClick={event => closeActionMenu(event, () => onOpenParticipant(participant))}>Editar</button>
-                  <button className="danger" onClick={event => closeActionMenu(event, () => onRemoveParticipant(participant.id))}>
-                    Remover
-                  </button>
+          <>
+            <div className="hover-expand-list">
+              {(data.participants || []).map(participant => (
+                <div className="setting-row" key={participant.id}>
+                  <span className="participant-avatar">{participant.name.slice(0, 1).toUpperCase()}</span>
+                  <b>{participant.name}</b>
+                  <details className="row-actions">
+                    <summary aria-label={`Ações para ${participant.name}`} title="Ações">···</summary>
+                    <div className={`row-action-menu ${theme === 'dark' ? 'is-dark' : 'is-light'}`}>
+                      <button onClick={event => closeActionMenu(event, () => onOpenParticipant(participant))}>Editar</button>
+                      <button className="danger" onClick={event => closeActionMenu(event, () => onRemoveParticipant(participant.id))}>
+                        Remover
+                      </button>
+                    </div>
+                  </details>
                 </div>
-              </details>
+              ))}
             </div>
-          ))
+            {(data.participants || []).length > 3 && (
+              <div className="hover-expand-hint">
+                Mostrando 3 de {(data.participants || []).length} · passe o mouse para ver todos
+              </div>
+            )}
+          </>
         ) : (
           <div className="empty compact">Adicione pessoas para acompanhar o que elas precisam reembolsar.</div>
         )}

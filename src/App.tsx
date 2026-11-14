@@ -234,18 +234,14 @@ function App() {
 
   const [month, setMonth] = useState(monthKey(today))
   const [view, setView] = useState<MainView>(() => {
-    const saved = localStorage.getItem('nexus-default-view')
+    const saved = localStorage.getItem('poe-na-conta-last-view') || localStorage.getItem('nexus-default-view')
     return saved === 'Lançamentos' || saved === 'Relatórios' || saved === 'Investimentos' || saved === 'Recorrências' || saved === 'Ajustes'
       ? saved
       : 'Visão geral'
   })
-  const [defaultView, setDefaultView] = useState<MainView>(() => {
-    const saved = localStorage.getItem('nexus-default-view')
-    return saved === 'Lançamentos' || saved === 'Relatórios' || saved === 'Investimentos' || saved === 'Recorrências' || saved === 'Ajustes'
-      ? saved
-      : 'Visão geral'
-  })
-  const [overviewMode, setOverviewMode] = useState<'expenses' | 'investments'>('expenses')
+  const [overviewMode, setOverviewMode] = useState<'expenses' | 'investments'>(() =>
+    localStorage.getItem('poe-na-conta-overview-mode') === 'investments' ? 'investments' : 'expenses',
+  )
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('nexus-theme') === 'dark' ? 'dark' : 'light'))
   const [defaultTheme, setDefaultTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('nexus-theme') === 'dark' ? 'dark' : 'light'))
   const [profileName, setProfileName] = useState(() => localStorage.getItem('poe-na-conta-profile-name') || '')
@@ -1000,10 +996,13 @@ function App() {
     setEasterEggShake(false)
     setEasterEggMessage(secretMessage)
   }
-  const updateDefaultView = (next: MainView) => {
-    setDefaultView(next)
-    localStorage.setItem('nexus-default-view', next)
-  }
+  useEffect(() => {
+    localStorage.setItem('poe-na-conta-last-view', view)
+  }, [view])
+  useEffect(() => {
+    localStorage.setItem('poe-na-conta-overview-mode', overviewMode)
+  }, [overviewMode])
+
   const updateDefaultTheme = (next: 'light' | 'dark') => {
     setDefaultTheme(next)
     setTheme(next)
@@ -1579,7 +1578,7 @@ function App() {
       return
     }
     const blob = new Blob(
-      [createBackup(data, { monthlyLimit, limitNoticePercent: String(limitNoticePercentValue), defaultView, theme, profileName, profilePhoto, pixKey })],
+      [createBackup(data, { monthlyLimit, limitNoticePercent: String(limitNoticePercentValue), defaultView: view, theme, profileName, profilePhoto, pixKey })],
       { type: 'application/json;charset=utf-8' },
     )
     const url = URL.createObjectURL(blob)
@@ -1598,13 +1597,12 @@ function App() {
       const { monthlyLimit: importedLimit, limitNoticePercent: importedPercent, defaultView: importedView, theme: importedTheme } = payload.preferences
       setMonthlyLimit(importedLimit)
       setLimitNoticePercent(importedPercent)
-      setDefaultView(importedView)
       setView(importedView)
       setTheme(importedTheme)
       setDefaultTheme(importedTheme)
       localStorage.setItem('poe-na-conta-monthly-limit', importedLimit)
       localStorage.setItem('poe-na-conta-limit-notice-percent', importedPercent)
-      localStorage.setItem('nexus-default-view', importedView)
+      localStorage.setItem('poe-na-conta-last-view', importedView)
       localStorage.setItem('nexus-theme', importedTheme)
       if (payload.preferences.profileName !== undefined) {
         setProfileName(payload.preferences.profileName)
@@ -1715,8 +1713,8 @@ function App() {
     setLastBackupAt('')
     setChangesSinceBackup(0)
     setBackupSnoozeUntil(0)
-    setDefaultView('Visão geral')
     setView('Visão geral')
+    setOverviewMode('expenses')
     setSelectedExpenseIds([])
     setRecurrenceSelection(null)
     setQuery('')
@@ -2665,7 +2663,6 @@ function App() {
             <SettingsView
               data={data}
               theme={theme}
-              defaultView={defaultView}
               defaultTheme={defaultTheme}
               profileName={profileName}
               profilePhoto={profilePhoto}
@@ -2681,7 +2678,6 @@ function App() {
               onUpdatePixKey={updatePixKey}
               onPickProfilePhoto={() => profilePhotoInput.current?.click()}
               onRemoveProfilePhoto={removeProfilePhoto}
-              onUpdateDefaultView={updateDefaultView}
               onUpdateDefaultTheme={updateDefaultTheme}
               onUpdateMonthlyLimit={updateMonthlyLimit}
               onUpdateLimitNoticePercent={updateLimitNoticePercent}

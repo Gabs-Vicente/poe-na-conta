@@ -85,9 +85,14 @@ export function RecurrencesView({
                       </small>
                     </span>
                     <b className="recurrence-amount">{money(item.amount)}</b>
-                    <button type="button" className="recurrence-skip" onClick={() => onSkipRecurrence(item.id)}>
-                      Pular
-                    </button>
+                    <div className="recurrence-review-item-actions">
+                      <button type="button" className="recurrence-skip" onClick={() => onOpenRecurrence(item)}>
+                        Editar valor
+                      </button>
+                      <button type="button" className="recurrence-skip" onClick={() => onSkipRecurrence(item.id)}>
+                        Pular
+                      </button>
+                    </div>
                   </div>
                 )
               })}
@@ -107,7 +112,7 @@ export function RecurrencesView({
         <div className="panel-head">
           <div>
             <h2>Modelos mensais</h2>
-            <p>Gerencie os valores e a frequência das despesas.</p>
+            <p>Editar, pausar ou excluir aqui atualiza automaticamente a despesa correspondente neste mês.</p>
           </div>
           <span className="recurrence-count">{recurrences.filter(item => item.active).length} ativas</span>
         </div>
@@ -115,6 +120,15 @@ export function RecurrencesView({
           <div className="recurrence-list">
             {recurrences.map(item => {
               const category = data.categories.find(value => value.id === item.category)
+              const isLaunchedInMonth =
+                item.active &&
+                (item.generatedMonths.includes(month) ||
+                  data.expenses.some(
+                    exp =>
+                      (exp.recurrenceId === item.id ||
+                        (exp.installments === 1 && exp.description.trim().toLowerCase() === item.description.trim().toLowerCase())) &&
+                      ((exp.recurrenceMonth || exp.date.slice(0, 7)) === month || exp.firstMonth === month),
+                  ))
               return (
                 <div className={`recurrence-template ${item.active ? '' : 'is-paused'}`} key={item.id}>
                   <span className="category-icon" style={{ color: category?.color, background: `${category?.color}18` }}>
@@ -123,7 +137,8 @@ export function RecurrencesView({
                   <span className="recurrence-info">
                     <b>{item.description}</b>
                     <small>
-                      {category?.name || 'Sem categoria'} · Dia {item.day} · {item.active ? 'Ativa' : 'Pausada'}
+                      {category?.name || 'Sem categoria'} · Dia {item.day} ·{' '}
+                      {!item.active ? 'Pausada (fora das despesas)' : isLaunchedInMonth ? `Ativa · Contabilizada em ${monthName(month)}` : 'Ativa · Pendente no mês'}
                     </small>
                   </span>
                   <b className="recurrence-amount">{money(item.amount)}</b>

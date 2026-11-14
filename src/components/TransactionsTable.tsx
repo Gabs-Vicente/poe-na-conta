@@ -36,6 +36,7 @@ type TransactionsTableProps = {
   onToggleSelectExpense: (id: string, checked: boolean) => void
   onDeleteSelectedExpenses: () => void
   onDownloadCsv: () => void
+  onDownloadImage: () => void
   onEditExpense: (expense: Expense) => void
   onDuplicateExpense: (expense: Expense) => void
   onDeleteExpense: (id: string) => void
@@ -74,6 +75,7 @@ export function TransactionsTable({
   onToggleSelectExpense,
   onDeleteSelectedExpenses,
   onDownloadCsv,
+  onDownloadImage,
   onEditExpense,
   onDuplicateExpense,
   onDeleteExpense,
@@ -127,9 +129,14 @@ export function TransactionsTable({
           <h2>{view === 'Relatórios' ? 'Relatório de despesas' : 'Todos os lançamentos'}</h2>
           <p>{view === 'Relatórios' ? 'Gastos pessoais e valores atribuídos a participantes.' : 'Consulte, ordene ou filtre por categoria, forma de pagamento ou cartão.'}</p>
         </div>
-        <button className="export-btn" aria-label="Exportar CSV" onClick={onDownloadCsv}>
-          ↓ <span>Exportar CSV</span>
-        </button>
+        <div className="export-actions-group">
+          <button className="export-btn" aria-label="Exportar planilha estilizada" onClick={onDownloadCsv}>
+            📊 <span>Exportar Planilha</span>
+          </button>
+          <button className="export-btn" aria-label="Exportar relatório em imagem PNG" onClick={onDownloadImage}>
+            🖼 <span>Exportar Imagem</span>
+          </button>
+        </div>
       </div>
       <div className="data-summary">
         <div className="data-summary-card is-primary">
@@ -224,7 +231,9 @@ export function TransactionsTable({
           >
             <option>Todos os cartões</option>
             {data.cards.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+              <option key={c.id} value={c.id}>
+                {c.kind === 'store' ? '🛍️' : c.kind === 'borrowed' ? '🤝' : '🏦'} {c.name}
+              </option>
             ))}
           </select>
         )}

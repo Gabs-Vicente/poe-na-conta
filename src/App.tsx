@@ -10,11 +10,11 @@ import {
   buildOccurrences as calculateOccurrences,
   cardDueMonth as calculateCardDueMonth,
   createBackup,
-  csvCell,
   dateKey,
   expenseFirstMonth,
   formatMoneyInput,
   isDate,
+  isManualBillingCard,
   monthKey,
   normalizeDateInput,
   occurrencePersonalValue,
@@ -30,6 +30,7 @@ import {
   splitAmountEquallyWithMe,
   type BackupPayload,
   type Card,
+  type CardKind,
   type Category,
   type ClosingDayRule,
   type Data,
@@ -53,6 +54,9 @@ import {
   type MainView,
   type SortOrder,
 } from './utils/format'
+import { exportReportImage, exportStyledSpreadsheet } from './utils/exportReport'
+
+type FirstMonthMode = 'auto' | 'current' | 'next' | 'plus2'
 
 type ExpenseForm = {
   description: string
@@ -63,6 +67,7 @@ type ExpenseForm = {
   cardId: string
   installments: string
   afterClosing: boolean
+  firstMonthMode: FirstMonthMode
   shares: { participantId: string; amount: string; installment: string }[]
 }
 type SettingEditor = {
@@ -70,6 +75,7 @@ type SettingEditor = {
   id?: string
   name: string
   color: string
+  cardKind: CardKind
   closingDay: string
   dueDay: string
   closingDayRule: ClosingDayRule
@@ -237,6 +243,7 @@ function App() {
     cardId: storedData.data.cards[0]?.id || '',
     installments: '2',
     afterClosing: (storedData.data.cards[0]?.closingDayRule ?? 'after') !== 'before',
+    firstMonthMode: isManualBillingCard(storedData.data.cards[0]) ? 'next' : 'auto',
     shares: [],
   }))
   const [shareError, setShareError] = useState('')
@@ -344,12 +351,25 @@ function App() {
 
   const normalizedFormDate = normalizeDateInput(form.date)
   const selectedFormCard = data.cards.find(card => card.id === form.cardId) || data.cards[0]
+  const isManualFormCard = isManualBillingCard(selectedFormCard)
+  const effectiveFirstMonthMode: FirstMonthMode = isManualFormCard ? (form.firstMonthMode === 'auto' ? 'next' : form.firstMonthMode) : 'auto'
+  const purchaseBaseMonth = isDate(normalizedFormDate) ? normalizedFormDate.slice(0, 7) : month
   const isFormOnClosingDay = Boolean(
-    form.method.startsWith('Crédito') && selectedFormCard && isDate(normalizedFormDate) && Number(normalizedFormDate.slice(-2)) === selectedFormCard.closingDay,
+    form.method.startsWith('Crédito') &&
+    selectedFormCard &&
+    !isManualFormCard &&
+    isDate(normalizedFormDate) &&
+    Number(normalizedFormDate.slice(-2)) === selectedFormCard.closingDay,
   )
   const creditDueMonth =
     form.method.startsWith('Crédito') && selectedFormCard && isDate(normalizedFormDate)
-      ? calculateCardDueMonth(normalizedFormDate, selectedFormCard, form.afterClosing)
+      ? isManualFormCard
+        ? effectiveFirstMonthMode === 'current'
+          ? purchaseBaseMonth
+          : effectiveFirstMonthMode === 'plus2'
+            ? shiftMonthKey(purchaseBaseMonth, 2)
+            : shiftMonthKey(purchaseBaseMonth, 1)
+        : calculateCardDueMonth(normalizedFormDate, selectedFormCard, form.afterClosing)
       : ''
 
   const parsedFormAmount = parseMoneyInput(form.amount)
@@ -445,6 +465,7 @@ function App() {
       cardId: defaultCard?.id || '',
       installments: '2',
       afterClosing: (defaultCard?.closingDayRule ?? 'after') !== 'before',
+      firstMonthMode: isManualBillingCard(defaultCard) ? 'next' : 'auto',
       shares: [],
     })
     setModal(true)
@@ -945,7 +966,46 @@ function App() {
   }
 
   const recurrences = data.recurrences || []
-  const pendingRecurrences = recurrences.filter(item => item.active && !item.generatedMonths.includes(month) && !item.skippedMonths.includes(month))
+
+  const matchesRecurrenceInMonth = (expense: Expense, recurrence: Recurrence, targetMonth: string): boolean => {
+    const expMonth = expense.recurrenceMonth || expense.date.slice(0, 7)
+    const inTargetMonth = expMonth === targetMonth || expense.firstMonth === targetMonth
+    if (!inTargetMonth) return false
+    if (expense.recurrenceId) return expense.recurrenceId === recurrence.id
+    return (
+      expense.installments === 1 &&
+      expense.description.trim().toLowerCase() === recurrence.description.trim().toLowerCase()
+    )
+  }
+
+  const buildRecurrenceExpense = (item: Recurrence, targetMonth: string, existing?: Expense): Expense => {
+    const maxDay = new Date(Number(targetMonth.slice(0, 4)), Number(targetMonth.slice(5)), 0).getDate()
+    const date = `${targetMonth}-${String(Math.min(item.day, maxDay)).padStart(2, '0')}`
+    const card = item.method.startsWith('Crédito') ? data.cards.find(value => value.id === item.cardId) || data.cards[0] : undefined
+    const firstMonth = item.method.startsWith('Crédito') && card && !isManualBillingCard(card) ? calculateCardDueMonth(date, card) : targetMonth
+    return {
+      id: existing?.id || createId(),
+      description: item.description,
+      amount: item.amount,
+      date,
+      category: item.category,
+      method: item.method,
+      cardId: card?.id,
+      installments: 1,
+      firstMonth,
+      recurrenceId: item.id,
+      recurrenceMonth: targetMonth,
+      ...(existing?.shares ? { shares: existing.shares } : {}),
+    }
+  }
+
+  const pendingRecurrences = recurrences.filter(
+    item =>
+      item.active &&
+      !item.generatedMonths.includes(month) &&
+      !item.skippedMonths.includes(month) &&
+      !data.expenses.some(exp => matchesRecurrenceInMonth(exp, item, month)),
+  )
   const selectedRecurrences = recurrenceSelection ?? pendingRecurrences.map(item => item.id)
 
   const openRecurrence = (item?: Recurrence) => {
@@ -983,7 +1043,7 @@ function App() {
     }
     setRecurrenceErrors({})
     const previous = recurrenceEditor.id ? recurrences.find(value => value.id === recurrenceEditor.id) : undefined
-    const item: Recurrence = {
+    const baseItem: Recurrence = {
       id: recurrenceEditor.id || createId(),
       description: recurrenceEditor.description.trim(),
       amount,
@@ -995,30 +1055,81 @@ function App() {
       generatedMonths: previous?.generatedMonths || [],
       skippedMonths: previous?.skippedMonths || [],
     }
-    if (save({ ...data, recurrences: recurrenceEditor.id ? recurrences.map(value => (value.id === item.id ? item : value)) : [...recurrences, item] })) {
-      showToast(recurrenceEditor.id ? 'Recorrência atualizada.' : 'Recorrência criada.')
+    const existingMonthExpense = data.expenses.find(
+      exp => (previous && matchesRecurrenceInMonth(exp, previous, month)) || matchesRecurrenceInMonth(exp, baseItem, month),
+    )
+    const shouldEnsureGeneratedInMonth = Boolean(existingMonthExpense && !baseItem.generatedMonths.includes(month))
+    const item: Recurrence = shouldEnsureGeneratedInMonth
+      ? { ...baseItem, generatedMonths: [...baseItem.generatedMonths, month] }
+      : baseItem
+    const updatedExpenses = existingMonthExpense
+      ? data.expenses.map(exp => (exp.id === existingMonthExpense.id ? buildRecurrenceExpense(item, month, exp) : exp))
+      : data.expenses
+    if (
+      save({
+        ...data,
+        expenses: updatedExpenses,
+        recurrences: recurrenceEditor.id ? recurrences.map(value => (value.id === item.id ? item : value)) : [...recurrences, item],
+      })
+    ) {
+      showToast(
+        recurrenceEditor.id
+          ? existingMonthExpense
+            ? 'Recorrência e lançamento do mês atualizados.'
+            : 'Recorrência atualizada.'
+          : existingMonthExpense
+            ? 'Recorrência criada e vinculada ao lançamento do mês.'
+            : 'Recorrência criada.',
+      )
       closeRecurrenceModal()
+    }
+  }
+  const toggleRecurrenceActive = (item: Recurrence) => {
+    const nextActive = !item.active
+    if (!nextActive) {
+      const remainingExpenses = data.expenses.filter(exp => !matchesRecurrenceInMonth(exp, item, month))
+      const removedFromMonth = remainingExpenses.length !== data.expenses.length
+      const updatedItem: Recurrence = {
+        ...item,
+        active: false,
+        generatedMonths: item.generatedMonths.filter(m => m !== month),
+      }
+      if (
+        save({
+          ...data,
+          expenses: remainingExpenses,
+          recurrences: recurrences.map(value => (value.id === item.id ? updatedItem : value)),
+        })
+      ) {
+        showToast(removedFromMonth ? 'Recorrência pausada e removida das despesas deste mês.' : 'Recorrência pausada.')
+      }
+    } else {
+      const existingInMonth = data.expenses.find(exp => matchesRecurrenceInMonth(exp, item, month))
+      const nextGenerated = item.generatedMonths.includes(month) ? item.generatedMonths : [...item.generatedMonths, month]
+      const updatedItem: Recurrence = {
+        ...item,
+        active: true,
+        generatedMonths: nextGenerated,
+        skippedMonths: item.skippedMonths.filter(m => m !== month),
+      }
+      const nextExpenses = existingInMonth
+        ? data.expenses.map(exp => (exp.id === existingInMonth.id ? buildRecurrenceExpense(updatedItem, month, exp) : exp))
+        : [buildRecurrenceExpense(updatedItem, month), ...data.expenses]
+      if (
+        save({
+          ...data,
+          expenses: nextExpenses,
+          recurrences: recurrences.map(value => (value.id === item.id ? updatedItem : value)),
+        })
+      ) {
+        showToast('Recorrência reativada e lançada neste mês.')
+      }
     }
   }
   const confirmRecurrences = () => {
     const chosen = pendingRecurrences.filter(item => selectedRecurrences.includes(item.id))
     if (!chosen.length) return
-    const generated: Expense[] = chosen.map(item => {
-      const date = `${month}-${String(Math.min(item.day, new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate())).padStart(2, '0')}`
-      const card = data.cards.find(value => value.id === item.cardId) || data.cards[0]
-      const firstMonth = item.method.startsWith('Crédito') && card ? calculateCardDueMonth(date, card) : month
-      return {
-        id: createId(),
-        description: item.description,
-        amount: item.amount,
-        date,
-        category: item.category,
-        method: item.method,
-        cardId: card?.id,
-        installments: 1,
-        firstMonth,
-      }
-    })
+    const generated: Expense[] = chosen.map(item => buildRecurrenceExpense(item, month))
     const ids = new Set(chosen.map(item => item.id))
     if (
       save({
@@ -1102,8 +1213,23 @@ function App() {
     setShareError('')
     const card = form.method.startsWith('Crédito') ? data.cards.find(c => c.id === form.cardId) || getPreferredCard() : undefined
     if (card?.id) rememberCard(card.id)
-    const onClosingDay = Boolean(card && Number(normalizedDate.slice(-2)) === card.closingDay)
-    const firstMonth = expenseFirstMonth(normalizedDate, form.method, card, onClosingDay ? form.afterClosing : undefined)
+    const isManualCard = isManualBillingCard(card)
+    const resolvedFirstMonthMode: FirstMonthMode = isManualCard ? (form.firstMonthMode === 'auto' ? 'next' : form.firstMonthMode) : 'auto'
+    const basePurchaseMonth = normalizedDate.slice(0, 7)
+    const manualMonth =
+      form.method.startsWith('Crédito') && isManualCard
+        ? resolvedFirstMonthMode === 'current'
+          ? basePurchaseMonth
+          : resolvedFirstMonthMode === 'plus2'
+            ? shiftMonthKey(basePurchaseMonth, 2)
+            : shiftMonthKey(basePurchaseMonth, 1)
+        : undefined
+    const onClosingDay = Boolean(card && !isManualCard && Number(normalizedDate.slice(-2)) === card.closingDay)
+    const firstMonth = manualMonth || expenseFirstMonth(normalizedDate, form.method, card, onClosingDay ? form.afterClosing : undefined)
+    const previousExpense = editingExpenseId ? data.expenses.find(e => e.id === editingExpenseId) : undefined
+    const linkedRecurrence = previousExpense
+      ? recurrences.find(rec => matchesRecurrenceInMonth(previousExpense, rec, previousExpense.recurrenceMonth || previousExpense.date.slice(0, 7)))
+      : undefined
     const entry: Expense = {
       id: editingExpenseId || createId(),
       description,
@@ -1114,10 +1240,34 @@ function App() {
       cardId: card?.id,
       installments: form.method === 'Crédito parcelado' ? Math.max(1, n) : 1,
       firstMonth,
+      ...(manualMonth ? { manualFirstMonth: true } : {}),
       ...(onClosingDay ? { afterClosing: form.afterClosing } : {}),
+      ...(linkedRecurrence ? { recurrenceId: linkedRecurrence.id, recurrenceMonth: previousExpense?.recurrenceMonth || normalizedDate.slice(0, 7) } : {}),
       shares,
     }
-    if (!save({ ...data, expenses: editingExpenseId ? data.expenses.map(e => (e.id === editingExpenseId ? entry : e)) : [entry, ...data.expenses] })) return
+    const syncedRecurrences =
+      linkedRecurrence && entry.installments === 1
+        ? recurrences.map(rec =>
+            rec.id === linkedRecurrence.id
+              ? {
+                  ...rec,
+                  description: entry.description,
+                  amount: entry.amount,
+                  category: entry.category,
+                  method: entry.method,
+                  cardId: entry.cardId,
+                }
+              : rec,
+          )
+        : recurrences
+    if (
+      !save({
+        ...data,
+        expenses: editingExpenseId ? data.expenses.map(e => (e.id === editingExpenseId ? entry : e)) : [entry, ...data.expenses],
+        ...(linkedRecurrence ? { recurrences: syncedRecurrences } : {}),
+      })
+    )
+      return
     const nextCard = card || getPreferredCard()
     if (!editingExpenseId && keepExpenseModalOpen) {
       if (firstMonth !== month) {
@@ -1137,6 +1287,7 @@ function App() {
         cardId: nextCard?.id || '',
         installments: '2',
         afterClosing: (nextCard?.closingDayRule ?? 'after') !== 'before',
+        firstMonthMode: isManualBillingCard(nextCard) ? 'next' : 'auto',
         shares: [],
       })
       if (!isTouchDevice()) {
@@ -1165,6 +1316,7 @@ function App() {
         cardId: nextCard?.id || '',
         installments: '2',
         afterClosing: (nextCard?.closingDayRule ?? 'after') !== 'before',
+        firstMonthMode: isManualBillingCard(nextCard) ? 'next' : 'auto',
         shares: [],
       })
     })
@@ -1173,6 +1325,15 @@ function App() {
   const editExpense = (expense: Expense) => {
     const expenseCard = data.cards.find(c => c.id === expense.cardId) || data.cards[0]
     const hasShares = (expense.shares || []).length > 0
+    const baseMonth = expense.date.slice(0, 7)
+    const editFirstMonthMode: FirstMonthMode =
+      isManualBillingCard(expenseCard)
+        ? expense.firstMonth === baseMonth
+          ? 'current'
+          : expense.firstMonth === shiftMonthKey(baseMonth, 2)
+            ? 'plus2'
+            : 'next'
+        : 'auto'
     setEditingExpenseId(expense.id)
     setParticipantsSectionOpen(hasShares)
     setForm({
@@ -1184,6 +1345,7 @@ function App() {
       cardId: expense.cardId || expenseCard?.id || '',
       installments: String(expense.installments > 1 ? expense.installments : 2),
       afterClosing: expense.afterClosing ?? (expenseCard?.closingDayRule ?? 'after') !== 'before',
+      firstMonthMode: editFirstMonthMode,
       shares: (expense.shares || []).map(share => ({
         participantId: share.participantId,
         amount: formatMoneyInput(share.amount),
@@ -1209,6 +1371,7 @@ function App() {
       cardId: expense.cardId || expenseCard?.id || '',
       installments: String(expense.installments > 1 ? expense.installments : 2),
       afterClosing: (expenseCard?.closingDayRule ?? 'after') !== 'before',
+      firstMonthMode: isManualBillingCard(expenseCard) ? 'next' : 'auto',
       shares: (expense.shares || []).map(share => ({
         participantId: share.participantId,
         amount: formatMoneyInput(share.amount),
@@ -1229,7 +1392,12 @@ function App() {
     })
   const closeConfirmDialog = () => closeModalWithAnimation('confirm', () => setConfirmDialog(null))
   const deleteExpense = (id: string) => {
-    if (save({ ...data, expenses: data.expenses.filter(e => e.id !== id) })) {
+    const target = data.expenses.find(e => e.id === id)
+    const expMonth = target ? target.recurrenceMonth || target.date.slice(0, 7) : ''
+    const updatedRecurrences = target
+      ? recurrences.map(rec => (matchesRecurrenceInMonth(target, rec, expMonth) ? { ...rec, generatedMonths: rec.generatedMonths.filter(m => m !== expMonth) } : rec))
+      : recurrences
+    if (save({ ...data, expenses: data.expenses.filter(e => e.id !== id), recurrences: updatedRecurrences })) {
       setSelectedExpenseIds(current => current.filter(item => item !== id))
       showToast('Lançamento excluído.')
     }
@@ -1258,7 +1426,16 @@ function App() {
       confirmLabel: count === 1 ? 'Excluir lançamento' : `Excluir ${count} lançamentos`,
       onConfirm: () => {
         const toDelete = new Set(idsToDelete)
-        if (save({ ...data, expenses: data.expenses.filter(e => !toDelete.has(e.id)) })) {
+        const removedExpenses = data.expenses.filter(e => toDelete.has(e.id))
+        const updatedRecurrences = recurrences.map(rec => {
+          const monthsToRemove = new Set(
+            removedExpenses
+              .map(exp => exp.recurrenceMonth || exp.date.slice(0, 7))
+              .filter(expMonth => removedExpenses.some(exp => matchesRecurrenceInMonth(exp, rec, expMonth))),
+          )
+          return monthsToRemove.size > 0 ? { ...rec, generatedMonths: rec.generatedMonths.filter(m => !monthsToRemove.has(m)) } : rec
+        })
+        if (save({ ...data, expenses: data.expenses.filter(e => !toDelete.has(e.id)), recurrences: updatedRecurrences })) {
           setSelectedExpenseIds(current => current.filter(id => !toDelete.has(id)))
           showToast(count === 1 ? '1 lançamento excluído.' : `${count} lançamentos excluídos.`)
         }
@@ -1267,37 +1444,40 @@ function App() {
     })
   }
   const downloadCsv = () => {
-    const rows = [
-      ['Descrição', 'Valor da parcela', 'Parte pessoal', 'A receber', 'Parcela', 'Mês', 'Categoria', 'Pagamento', 'Participantes'],
-      ...current.map(e => [
-        e.description,
-        e.value.toFixed(2),
-        personalValue(e).toFixed(2),
-        e.allocatedShares.reduce((sum, share) => sum + share.amount, 0).toFixed(2),
-        `${e.part}/${e.installments}`,
-        e.month,
-        data.categories.find(c => c.id === e.category)?.name || '',
-        e.method,
-        e.allocatedShares
-          .map(share =>
-            share.participantId === QUICK_THIRD_PARTY_ID
-              ? QUICK_THIRD_PARTY_NAME
-              : data.participants?.find(p => p.id === share.participantId)?.name || 'Participante',
-          )
-          .join(', '),
-      ]),
-    ]
-    const untrustedColumns = new Set([0, 6, 7, 8])
-    const blob = new Blob(['\ufeff' + rows.map(row => row.map((cell, index) => csvCell(cell, untrustedColumns.has(index))).join(';')).join('\n')], {
-      type: 'text/csv;charset=utf-8',
+    const itemsToExport = hasActiveFilters ? filtered : current
+    const personalSum = hasActiveFilters ? filteredPersonalTotal : total
+    const reimbSum = hasActiveFilters ? filteredReimbursementTotal : reimbursementTotal
+    const invoiceSum = itemsToExport.reduce((sum, e) => sum + e.value, 0)
+    exportStyledSpreadsheet({
+      month,
+      theme,
+      profileName,
+      data,
+      items: itemsToExport,
+      personalTotal: personalSum,
+      reimbursementTotal: reimbSum,
+      invoiceTotal: invoiceSum,
+      personalValue,
     })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `relatorio-${month}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-    showToast('Relatório CSV exportado.')
+    showToast('Planilha estilizada (.xls) exportada com sucesso.')
+  }
+  const downloadReportImage = () => {
+    const itemsToExport = hasActiveFilters ? filtered : current
+    const personalSum = hasActiveFilters ? filteredPersonalTotal : total
+    const reimbSum = hasActiveFilters ? filteredReimbursementTotal : reimbursementTotal
+    const invoiceSum = itemsToExport.reduce((sum, e) => sum + e.value, 0)
+    exportReportImage({
+      month,
+      theme,
+      profileName,
+      data,
+      items: itemsToExport,
+      personalTotal: personalSum,
+      reimbursementTotal: reimbSum,
+      invoiceTotal: invoiceSum,
+      personalValue,
+    })
+    showToast('Imagem do relatório (.PNG) exportada.')
   }
   const downloadBackup = () => {
     if (storageWarning) {
@@ -1467,6 +1647,7 @@ function App() {
       id: category?.id,
       name: category?.name || '',
       color: category?.color || '#6e7f72',
+      cardKind: 'bank',
       closingDay: '25',
       dueDay: '5',
       closingDayRule: 'after',
@@ -1479,6 +1660,7 @@ function App() {
       id: card?.id,
       name: card?.name || '',
       color: '#65a987',
+      cardKind: card?.kind || 'bank',
       closingDay: String(card?.closingDay || 25),
       dueDay: String(card?.dueDay || 5),
       closingDayRule: card?.closingDayRule || 'after',
@@ -1491,6 +1673,7 @@ function App() {
       id: participant?.id,
       name: participant?.name || '',
       color: '#65a987',
+      cardKind: 'bank',
       closingDay: '25',
       dueDay: '5',
       closingDayRule: 'after',
@@ -1507,17 +1690,17 @@ function App() {
   const saveSetting = (ev: React.FormEvent) => {
     ev.preventDefault()
     if (!settingsModal) return
-    const { kind, id, name, color, closingDay, dueDay, closingDayRule } = settingsModal
+    const { kind, id, name, color, cardKind, closingDay, dueDay, closingDayRule } = settingsModal
     const nextErrors: Record<string, string> = {}
     if (!name.trim()) {
-      nextErrors.name = kind === 'category' ? 'Informe o nome da categoria.' : kind === 'card' ? 'Informe o nome do cartão.' : 'Informe o nome do participante.'
+      nextErrors.name = kind === 'category' ? 'Informe o nome da categoria.' : kind === 'card' ? 'Informe o nome do cartão ou crédito.' : 'Informe o nome do participante.'
     }
     if (kind === 'category' && !/^#[0-9a-fA-F]{6}$/.test(color.trim())) {
       nextErrors.color = 'Informe uma cor hexadecimal válida (ex.: #6E7F72).'
     }
     const close = Number(closingDay)
     const due = Number(dueDay)
-    if (kind === 'card') {
+    if (kind === 'card' && cardKind === 'bank') {
       if (!closingDay.trim() || !Number.isInteger(close) || close < 1 || close > 31) nextErrors.closingDay = 'Informe um dia entre 1 e 31.'
       if (!dueDay.trim() || !Number.isInteger(due) || due < 1 || due > 31) nextErrors.dueDay = 'Informe um dia entre 1 e 31.'
     }
@@ -1532,12 +1715,15 @@ function App() {
       if (!save({ ...data, categories: id ? data.categories.map(c => (c.id === id ? category : c)) : [...data.categories, category] })) return
       showToast(id ? 'Categoria atualizada.' : 'Categoria criada.')
     } else if (kind === 'card') {
-      const card: Card = { id: id || createId(), name: name.trim(), closingDay: close, dueDay: due, closingDayRule: closingDayRule || 'after' }
+      const card: Card =
+        cardKind === 'store' || cardKind === 'borrowed'
+          ? { id: id || createId(), name: name.trim(), kind: cardKind, closingDay: 31, dueDay: 10, closingDayRule: 'after' }
+          : { id: id || createId(), name: name.trim(), kind: 'bank', closingDay: close, dueDay: due, closingDayRule: closingDayRule || 'after' }
       const updatedCards = id ? data.cards.map(c => (c.id === id ? card : c)) : [...data.cards, card]
       const updatedExpenses = data.expenses.map(e => {
-        if (!e.method.startsWith('Crédito')) return e
+        if (!e.method.startsWith('Crédito') || e.manualFirstMonth) return e
         const txCard = updatedCards.find(c => c.id === e.cardId) || (e.cardId === undefined ? updatedCards[0] : undefined)
-        if (!txCard || txCard.id !== card.id) return e
+        if (!txCard || txCard.id !== card.id || isManualBillingCard(txCard)) return e
         return { ...e, firstMonth: calculateCardDueMonth(e.date, txCard, e.afterClosing) }
       })
       if (!save({ ...data, cards: updatedCards, expenses: updatedExpenses })) return
@@ -1665,6 +1851,7 @@ function App() {
       onToggleSelectExpense={toggleSelectExpense}
       onDeleteSelectedExpenses={deleteSelectedExpenses}
       onDownloadCsv={downloadCsv}
+      onDownloadImage={downloadReportImage}
       onEditExpense={editExpense}
       onDuplicateExpense={duplicateExpense}
       onDeleteExpense={deleteExpense}
@@ -1972,17 +2159,20 @@ function App() {
               onConfirmRecurrences={confirmRecurrences}
               onSkipRecurrence={skipRecurrence}
               onOpenRecurrence={openRecurrence}
-              onToggleRecurrenceActive={item =>
-                save({ ...data, recurrences: recurrences.map(value => (value.id === item.id ? { ...value, active: !value.active } : value)) })
-              }
+              onToggleRecurrenceActive={toggleRecurrenceActive}
               onDeleteRecurrence={item =>
                 setConfirmDialog({
                   eyebrow: 'CONFIRMAR EXCLUSÃO',
                   title: `Excluir “${item.description}”?`,
-                  description: 'O modelo mensal será removido. Os lançamentos que já foram criados nos meses anteriores serão mantidos.',
+                  description: 'O modelo mensal será removido e o lançamento vinculado neste mês deixará de contabilizar nas suas despesas.',
                   confirmLabel: 'Excluir recorrência',
                   onConfirm: () => {
-                    if (save({ ...data, recurrences: recurrences.filter(value => value.id !== item.id) })) showToast('Recorrência excluída.')
+                    const remainingExpenses = data.expenses.filter(
+                      exp => exp.recurrenceId !== item.id && !matchesRecurrenceInMonth(exp, item, month),
+                    )
+                    if (save({ ...data, expenses: remainingExpenses, recurrences: recurrences.filter(value => value.id !== item.id) })) {
+                      showToast('Recorrência e lançamento vinculado excluídos.')
+                    }
                     closeConfirmDialog()
                   },
                 })
@@ -2189,6 +2379,7 @@ function App() {
                       method: nextMethod,
                       cardId: nextCardId,
                       afterClosing: (nextCard?.closingDayRule ?? 'after') !== 'before',
+                      firstMonthMode: isManualBillingCard(nextCard) ? (form.firstMonthMode === 'auto' ? 'next' : form.firstMonthMode) : 'auto',
                     })
                   }}
                 >
@@ -2203,7 +2394,7 @@ function App() {
             {form.method.startsWith('Crédito') && (
               <>
                 <label>
-                  Cartão
+                  Cartão / Crédito
                   <select
                     value={form.cardId || getPreferredCard()?.id || ''}
                     onFocus={blurActiveInputOnTouch}
@@ -2214,16 +2405,57 @@ function App() {
                         ...form,
                         cardId: e.target.value,
                         afterClosing: (nextCard?.closingDayRule ?? 'after') !== 'before',
+                        firstMonthMode: isManualBillingCard(nextCard) ? 'next' : 'auto',
                       })
                     }}
                   >
                     {data.cards.map(c => (
                       <option key={c.id} value={c.id}>
-                        {c.name} · fecha dia {c.closingDay} · vence dia {c.dueDay}
+                        {c.kind === 'store'
+                          ? `🛍️ ${c.name} · Crédito de loja (mês definido na compra)`
+                          : c.kind === 'borrowed'
+                            ? `🤝 ${c.name} · Cartão emprestado (mês definido na compra)`
+                            : `🏦 ${c.name} · fecha dia ${c.closingDay} · vence dia ${c.dueDay}`}
                       </option>
                     ))}
                   </select>
                 </label>
+                {selectedFormCard && isManualFormCard && isDate(normalizedFormDate) && (
+                  <div className="first-month-selector">
+                    <span className="first-month-selector-label">
+                      {form.method === 'Crédito parcelado' ? 'Quando cai a 1ª parcela?' : 'Em qual mês cai a cobrança?'}
+                      <small>
+                        {selectedFormCard.kind === 'borrowed'
+                          ? 'Escolha em qual mês você combinou de pagar essa compra'
+                          : 'Confira no app da loja para qual mês ficou o 1º pagamento'}
+                      </small>
+                    </span>
+                    <div className="first-month-pills" role="radiogroup" aria-label="Mês da cobrança ou primeira parcela">
+                      {(
+                        [
+                          { mode: 'current' as const, label: 'Neste mês', targetMonth: purchaseBaseMonth },
+                          { mode: 'next' as const, label: 'Próximo mês', targetMonth: shiftMonthKey(purchaseBaseMonth, 1) },
+                          { mode: 'plus2' as const, label: 'Daqui a 2 meses', targetMonth: shiftMonthKey(purchaseBaseMonth, 2) },
+                        ]
+                      ).map(opt => {
+                        const isSelected = effectiveFirstMonthMode === opt.mode
+                        return (
+                          <button
+                            key={opt.mode}
+                            type="button"
+                            role="radio"
+                            aria-checked={isSelected}
+                            className={`first-month-pill ${isSelected ? 'is-selected' : ''}`}
+                            onClick={() => setForm({ ...form, firstMonthMode: opt.mode })}
+                          >
+                            <b>{opt.label}</b>
+                            <small>{monthName(opt.targetMonth)}</small>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
                 {isFormOnClosingDay && selectedFormCard && (
                   <label>
                     Compra no dia do fechamento (dia {selectedFormCard.closingDay})
@@ -2235,17 +2467,27 @@ function App() {
                 )}
                 {selectedFormCard && creditDueMonth && (
                   <div className="billing-preview">
-                    <span>◷</span>
+                    <span>{selectedFormCard.kind === 'store' ? '🛍️' : selectedFormCard.kind === 'borrowed' ? '🤝' : '◷'}</span>
                     <div>
                       {form.method === 'Crédito parcelado' ? 'A 1ª parcela será contabilizada em' : 'Esta compra será contabilizada em'}{' '}
-                      <b>{monthName(creditDueMonth)}</b> (fechamento dia {selectedFormCard.closingDay} · vencimento dia {selectedFormCard.dueDay}).
-                      {Number(normalizedFormDate.slice(-2)) > selectedFormCard.closingDay
-                        ? ' Como a compra ocorreu após o fechamento, ela entra na próxima fatura.'
-                        : Number(normalizedFormDate.slice(-2)) === selectedFormCard.closingDay
-                          ? form.afterClosing
-                            ? ' Fatura considerada fechada no momento da compra (próxima fatura).'
-                            : ' Fatura considerada aberta no momento da compra (fatura atual).'
-                          : ' Como a compra ocorreu antes do fechamento, ela entra na fatura atual.'}
+                      <b>{monthName(creditDueMonth)}</b>
+                      {selectedFormCard.kind === 'store' ? (
+                        <> (Crédito de loja · escolha acima o mês informado pelo app após finalizar a compra).</>
+                      ) : selectedFormCard.kind === 'borrowed' ? (
+                        <> (Cartão emprestado · o valor ficará separado no resumo de {monthName(creditDueMonth)}).</>
+                      ) : (
+                        <>
+                          {' '}
+                          (fechamento dia {selectedFormCard.closingDay} · vencimento dia {selectedFormCard.dueDay}).
+                          {Number(normalizedFormDate.slice(-2)) > selectedFormCard.closingDay
+                            ? ' Como a compra ocorreu após o fechamento, ela entra na próxima fatura.'
+                            : Number(normalizedFormDate.slice(-2)) === selectedFormCard.closingDay
+                              ? form.afterClosing
+                                ? ' Fatura considerada fechada no momento da compra (próxima fatura).'
+                                : ' Fatura considerada aberta no momento da compra (fatura atual).'
+                              : ' Como a compra ocorreu antes do fechamento, ela entra na fatura atual.'}
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2680,7 +2922,9 @@ function App() {
                 Cartão
                 <select value={recurrenceEditor.cardId} onFocus={blurActiveInputOnTouch} onChange={event => setRecurrenceEditor({ ...recurrenceEditor, cardId: event.target.value })}>
                   {data.cards.map(card => (
-                    <option key={card.id} value={card.id}>{card.name}</option>
+                    <option key={card.id} value={card.id}>
+                      {card.kind === 'store' ? '🛍️' : card.kind === 'borrowed' ? '🤝' : '🏦'} {card.name}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -2751,13 +2995,64 @@ function App() {
                 <span className="eyebrow">AJUSTES</span>
                 <h2 id="settings-modal-title">
                   {settingsModal.id ? 'Editar' : 'Novo'}{' '}
-                  {settingsModal.kind === 'category' ? 'categoria' : settingsModal.kind === 'card' ? 'cartão' : 'participante'}
+                  {settingsModal.kind === 'category' ? 'categoria' : settingsModal.kind === 'card' ? 'cartão / crédito' : 'participante'}
                 </h2>
               </div>
               <button type="button" aria-label="Fechar ajustes" onClick={closeSettingsModal}>
                 ×
               </button>
             </div>
+            {settingsModal.kind === 'card' && (
+              <div className="card-kind-selector" role="radiogroup" aria-label="Tipo de crédito">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={settingsModal.cardKind === 'bank'}
+                  className={`card-kind-option ${settingsModal.cardKind === 'bank' ? 'is-selected' : ''}`}
+                  onClick={() => setSettingsModal({ ...settingsModal, cardKind: 'bank' })}
+                >
+                  <span className="card-kind-icon" aria-hidden="true">🏦</span>
+                  <div>
+                    <b>Cartão tradicional</b>
+                    <small>Com dia fixo de fechamento e vencimento</small>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={settingsModal.cardKind === 'store'}
+                  className={`card-kind-option ${settingsModal.cardKind === 'store' ? 'is-selected' : ''}`}
+                  onClick={() => {
+                    clearFieldError(setSettingsErrors, 'closingDay')
+                    clearFieldError(setSettingsErrors, 'dueDay')
+                    setSettingsModal({ ...settingsModal, cardKind: 'store' })
+                  }}
+                >
+                  <span className="card-kind-icon" aria-hidden="true">🛍️</span>
+                  <div>
+                    <b>Crédito de loja</b>
+                    <small>Shopee Pay, Mercado Crédito, AliExpress Parcela</small>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={settingsModal.cardKind === 'borrowed'}
+                  className={`card-kind-option ${settingsModal.cardKind === 'borrowed' ? 'is-selected' : ''}`}
+                  onClick={() => {
+                    clearFieldError(setSettingsErrors, 'closingDay')
+                    clearFieldError(setSettingsErrors, 'dueDay')
+                    setSettingsModal({ ...settingsModal, cardKind: 'borrowed' })
+                  }}
+                >
+                  <span className="card-kind-icon" aria-hidden="true">🤝</span>
+                  <div>
+                    <b>Cartão emprestado</b>
+                    <small>De mãe, familiar ou amigo (sem fechamento fixo)</small>
+                  </div>
+                </button>
+              </div>
+            )}
             <label className={settingsErrors.name ? 'is-invalid' : ''}>
               Nome
               <input
@@ -2767,7 +3062,15 @@ function App() {
                 maxLength={40}
                 aria-invalid={Boolean(settingsErrors.name)}
                 placeholder={
-                  settingsModal.kind === 'category' ? 'Ex.: Educação' : settingsModal.kind === 'card' ? 'Ex.: Cartão principal' : 'Ex.: Maria'
+                  settingsModal.kind === 'category'
+                    ? 'Ex.: Educação'
+                    : settingsModal.kind === 'card'
+                      ? settingsModal.cardKind === 'store'
+                        ? 'Ex.: Shopee Pay, Mercado Crédito, Parcela AliExpress'
+                        : settingsModal.cardKind === 'borrowed'
+                          ? 'Ex.: Cartão da Mãe, Cartão do Pai'
+                          : 'Ex.: Cartão principal'
+                      : 'Ex.: Maria'
                 }
                 value={settingsModal.name}
                 onChange={e => {
@@ -2779,6 +3082,27 @@ function App() {
                 <small className="field-error-msg" role="alert">
                   {settingsErrors.name}
                 </small>
+              )}
+              {settingsModal.kind === 'card' && (settingsModal.cardKind === 'store' || settingsModal.cardKind === 'borrowed') && (
+                <div className="store-card-presets">
+                  <span>Sugestões rápidas:</span>
+                  {(settingsModal.cardKind === 'store'
+                    ? ['Shopee Pay', 'Mercado Crédito', 'Parcela (AliExpress)']
+                    : ['Cartão da Mãe', 'Cartão do Pai', 'Cartão de Familiar']
+                  ).map(presetName => (
+                    <button
+                      key={presetName}
+                      type="button"
+                      className={`store-preset-chip ${settingsModal.name.trim().toLowerCase() === presetName.toLowerCase() ? 'is-active' : ''}`}
+                      onClick={() => {
+                        clearFieldError(setSettingsErrors, 'name')
+                        setSettingsModal({ ...settingsModal, name: presetName })
+                      }}
+                    >
+                      {presetName}
+                    </button>
+                  ))}
+                </div>
               )}
             </label>
             {settingsModal.kind === 'category' ? (
@@ -2906,66 +3230,86 @@ function App() {
                 )}
               </div>
             ) : settingsModal.kind === 'card' ? (
-              <>
-                <div className="form-row">
-                  <label className={settingsErrors.closingDay ? 'is-invalid' : ''}>
-                    Dia de fechamento
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      enterKeyHint="done"
-                      onKeyDown={dismissKeyboardOnEnter}
-                      aria-invalid={Boolean(settingsErrors.closingDay)}
-                      placeholder="1 a 31"
-                      value={settingsModal.closingDay}
-                      onChange={e => {
-                        clearFieldError(setSettingsErrors, 'closingDay')
-                        setSettingsModal({ ...settingsModal, closingDay: e.target.value.replace(/\D/g, '').slice(0, 2) })
-                      }}
-                    />
-                    {settingsErrors.closingDay ? (
-                      <small className="field-error-msg" role="alert">
-                        {settingsErrors.closingDay}
-                      </small>
-                    ) : (
-                      <small className="form-help">Compras após este dia entram na próxima fatura.</small>
-                    )}
-                  </label>
-                  <label className={settingsErrors.dueDay ? 'is-invalid' : ''}>
-                    Dia de vencimento
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      enterKeyHint="done"
-                      onKeyDown={dismissKeyboardOnEnter}
-                      aria-invalid={Boolean(settingsErrors.dueDay)}
-                      placeholder="1 a 31"
-                      value={settingsModal.dueDay}
-                      onChange={e => {
-                        clearFieldError(setSettingsErrors, 'dueDay')
-                        setSettingsModal({ ...settingsModal, dueDay: e.target.value.replace(/\D/g, '').slice(0, 2) })
-                      }}
-                    />
-                    {settingsErrors.dueDay && (
-                      <small className="field-error-msg" role="alert">
-                        {settingsErrors.dueDay}
-                      </small>
-                    )}
-                  </label>
+              settingsModal.cardKind === 'store' || settingsModal.cardKind === 'borrowed' ? (
+                <div className="store-card-info-box" role="note">
+                  <span aria-hidden="true">{settingsModal.cardKind === 'borrowed' ? '🤝' : '🛍️'}</span>
+                  <div>
+                    <b>{settingsModal.cardKind === 'borrowed' ? 'Sem precisar saber o fechamento da fatura' : 'Sem data fixa de fechamento'}</b>
+                    <p>
+                      {settingsModal.cardKind === 'borrowed' ? (
+                        <>
+                          Ideal quando você passa uma compra no cartão da mãe, familiar ou amigo. Ao lançar a despesa nesse cartão, basta tocar em <b>Neste mês</b> ou <b>Próximo mês</b> e o valor ficará separado no resumo daquele mês.
+                        </>
+                      ) : (
+                        <>
+                          Como o Shopee Pay, Mercado Crédito e Parcela (AliExpress) só informam a data de cobrança após finalizar o pedido, você não precisa informar dia de fechamento aqui. Na hora de lançar a compra, basta tocar em <b>Neste mês</b> ou <b>Próximo mês</b>.
+                        </>
+                      )}
+                    </p>
+                  </div>
                 </div>
-                <label>
-                  Compras no dia do fechamento
-                  <select
-                    value={settingsModal.closingDayRule}
-                    onFocus={blurActiveInputOnTouch}
-                    onChange={e => setSettingsModal({ ...settingsModal, closingDayRule: e.target.value as ClosingDayRule })}
-                  >
-                    <option value="after">Fatura já fechada (contabilizar na próxima fatura)</option>
-                    <option value="before">Fatura ainda aberta (contabilizar na fatura atual)</option>
-                  </select>
-                  <small className="form-help">Regra padrão aplicada quando uma compra é feita no próprio dia de fechamento.</small>
-                </label>
-              </>
+              ) : (
+                <>
+                  <div className="form-row">
+                    <label className={settingsErrors.closingDay ? 'is-invalid' : ''}>
+                      Dia de fechamento
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        enterKeyHint="done"
+                        onKeyDown={dismissKeyboardOnEnter}
+                        aria-invalid={Boolean(settingsErrors.closingDay)}
+                        placeholder="1 a 31"
+                        value={settingsModal.closingDay}
+                        onChange={e => {
+                          clearFieldError(setSettingsErrors, 'closingDay')
+                          setSettingsModal({ ...settingsModal, closingDay: e.target.value.replace(/\D/g, '').slice(0, 2) })
+                        }}
+                      />
+                      {settingsErrors.closingDay ? (
+                        <small className="field-error-msg" role="alert">
+                          {settingsErrors.closingDay}
+                        </small>
+                      ) : (
+                        <small className="form-help">Compras após este dia entram na próxima fatura.</small>
+                      )}
+                    </label>
+                    <label className={settingsErrors.dueDay ? 'is-invalid' : ''}>
+                      Dia de vencimento
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        enterKeyHint="done"
+                        onKeyDown={dismissKeyboardOnEnter}
+                        aria-invalid={Boolean(settingsErrors.dueDay)}
+                        placeholder="1 a 31"
+                        value={settingsModal.dueDay}
+                        onChange={e => {
+                          clearFieldError(setSettingsErrors, 'dueDay')
+                          setSettingsModal({ ...settingsModal, dueDay: e.target.value.replace(/\D/g, '').slice(0, 2) })
+                        }}
+                      />
+                      {settingsErrors.dueDay && (
+                        <small className="field-error-msg" role="alert">
+                          {settingsErrors.dueDay}
+                        </small>
+                      )}
+                    </label>
+                  </div>
+                  <label>
+                    Compras no dia do fechamento
+                    <select
+                      value={settingsModal.closingDayRule}
+                      onFocus={blurActiveInputOnTouch}
+                      onChange={e => setSettingsModal({ ...settingsModal, closingDayRule: e.target.value as ClosingDayRule })}
+                    >
+                      <option value="after">Fatura já fechada (contabilizar na próxima fatura)</option>
+                      <option value="before">Fatura ainda aberta (contabilizar na fatura atual)</option>
+                    </select>
+                    <small className="form-help">Regra padrão aplicada quando uma compra é feita no próprio dia de fechamento.</small>
+                  </label>
+                </>
+              )
             ) : (
               <p className="form-help participant-modal-help">
                 Os valores atribuídos a esta pessoa ficarão associados aos lançamentos correspondentes e serão salvos apenas neste dispositivo.
@@ -3464,7 +3808,7 @@ function App() {
                   <option value="">Nenhum (apenas no total do mês)</option>
                   {data.cards.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.name}
+                      {c.kind === 'store' ? '🛍️' : c.kind === 'borrowed' ? '🤝' : '🏦'} {c.name}
                     </option>
                   ))}
                 </select>

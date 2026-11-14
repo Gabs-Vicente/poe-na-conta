@@ -1,10 +1,13 @@
 export type Method = 'PIX' | 'Débito' | 'Dinheiro' | 'Crédito à vista' | 'Crédito parcelado'
 export type ClosingDayRule = 'after' | 'before'
+export type CardKind = 'bank' | 'store' | 'borrowed'
 export type Category = { id: string; name: string; color: string }
-export type Card = { id: string; name: string; closingDay: number; dueDay: number; closingDayRule?: ClosingDayRule }
+export type Card = { id: string; name: string; closingDay: number; dueDay: number; closingDayRule?: ClosingDayRule; kind?: CardKind }
+
+export const isManualBillingCard = (card?: Card): boolean => card?.kind === 'store' || card?.kind === 'borrowed'
 export type Participant = { id: string; name: string }
 export type ParticipantShare = { participantId: string; amount: number; installment?: number }
-export type Expense = { id: string; description: string; amount: number; date: string; category: string; method: Method; cardId?: string; installments: number; firstMonth: string; afterClosing?: boolean; shares?: ParticipantShare[] }
+export type Expense = { id: string; description: string; amount: number; date: string; category: string; method: Method; cardId?: string; installments: number; firstMonth: string; afterClosing?: boolean; manualFirstMonth?: boolean; recurrenceId?: string; recurrenceMonth?: string; shares?: ParticipantShare[] }
 export type Recurrence = { id: string; description: string; amount: number; category: string; method: Method; cardId?: string; day: number; active: boolean; generatedMonths: string[]; skippedMonths: string[] }
 export type Occurrence = Expense & { part: number; month: string; value: number; allocatedShares: ParticipantShare[] }
 export type InstallmentReliefItem = {
@@ -289,7 +292,7 @@ export const validateData = (value: unknown): value is Data => {
   const participants = value.participants === undefined ? [] : value.participants
   if (!Array.isArray(participants)) return false
   if (!value.categories.every(item => isRecord(item) && isText(item.id) && isText(item.name) && isText(item.color))) return false
-  if (!value.cards.every(item => isRecord(item) && isText(item.id) && isText(item.name) && isDay(item.closingDay) && isDay(item.dueDay) && (item.closingDayRule === undefined || item.closingDayRule === 'after' || item.closingDayRule === 'before'))) return false
+  if (!value.cards.every(item => isRecord(item) && isText(item.id) && isText(item.name) && isDay(item.closingDay) && isDay(item.dueDay) && (item.closingDayRule === undefined || item.closingDayRule === 'after' || item.closingDayRule === 'before') && (item.kind === undefined || item.kind === 'bank' || item.kind === 'store' || item.kind === 'borrowed'))) return false
   if (!participants.every(item => isRecord(item) && isText(item.id) && isText(item.name))) return false
   const recurrences = value.recurrences === undefined ? [] : value.recurrences
   if (!Array.isArray(recurrences) || !recurrences.every(item => isRecord(item) && isText(item.id) && isText(item.description) && isFiniteNumber(item.amount) && item.amount > 0 && isText(item.category) && methods.includes(item.method as Method) && isDay(item.day) && typeof item.active === 'boolean' && (item.cardId === undefined || isText(item.cardId)) && Array.isArray(item.generatedMonths) && item.generatedMonths.every(isText) && Array.isArray(item.skippedMonths) && item.skippedMonths.every(isText))) return false
@@ -299,6 +302,9 @@ export const validateData = (value: unknown): value is Data => {
     if (!isRecord(item) || !isText(item.id) || !isText(item.description) || !isFiniteNumber(item.amount) || item.amount <= 0 || !isDate(item.date) || !isText(item.category) || !methods.includes(item.method as Method) || !Number.isInteger(item.installments) || Number(item.installments) < 1 || Number(item.installments) > 60 || !isText(item.firstMonth) || !/^\d{4}-\d{2}$/.test(item.firstMonth)) return false
     if (item.cardId !== undefined && !isText(item.cardId)) return false
     if (item.afterClosing !== undefined && typeof item.afterClosing !== 'boolean') return false
+    if (item.manualFirstMonth !== undefined && typeof item.manualFirstMonth !== 'boolean') return false
+    if (item.recurrenceId !== undefined && !isText(item.recurrenceId)) return false
+    if (item.recurrenceMonth !== undefined && !isText(item.recurrenceMonth)) return false
     if (item.shares !== undefined && (!Array.isArray(item.shares) || !item.shares.every(share => isRecord(share) && isText(share.participantId) && isFiniteNumber(share.amount) && share.amount >= 0 && (share.installment === undefined || (Number.isInteger(share.installment) && Number(share.installment) >= 1 && Number(share.installment) <= 60))))) return false
     return true
   })
@@ -317,7 +323,7 @@ export const normalizeData = (rawValue: unknown): Data | null => {
       return expense.firstMonth === purchaseMonth ? expense : { ...expense, firstMonth: purchaseMonth }
     }
     const card = cards.find(item => item.id === expense.cardId) || (expense.cardId === undefined ? cards[0] : undefined)
-    if (!card) return expense
+    if (!card || isManualBillingCard(card) || expense.manualFirstMonth) return expense
     const expectedFirstMonth = cardDueMonth(expense.date, card, expense.afterClosing)
     return expense.firstMonth === expectedFirstMonth ? expense : { ...expense, firstMonth: expectedFirstMonth }
   })

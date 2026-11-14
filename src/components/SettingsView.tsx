@@ -241,9 +241,15 @@ export function SettingsView({
         </div>
         {data.cards.map(c => (
           <div className="setting-row" key={c.id}>
-            <span className="card-icon">▣</span>
+            <span className="card-icon">{c.kind === 'store' ? '🛍️' : c.kind === 'borrowed' ? '🤝' : '🏦'}</span>
             <b>{c.name}</b>
-            <span className="card-days">Fecha dia {c.closingDay} · Vence dia {c.dueDay}</span>
+            <span className="card-days">
+              {c.kind === 'store'
+                ? 'Crédito de loja · Mês definido na compra'
+                : c.kind === 'borrowed'
+                  ? 'Cartão emprestado · Mês definido na compra'
+                  : `Fecha dia ${c.closingDay} · Vence dia ${c.dueDay}`}
+            </span>
             <details className="row-actions">
               <summary aria-label={`Ações para o cartão ${c.name}`} title="Ações">···</summary>
               <div className={`row-action-menu ${theme === 'dark' ? 'is-dark' : 'is-light'}`}>
@@ -309,7 +315,7 @@ export function SettingsView({
             Importar backup
           </button>
           <button className="outline-btn" onClick={onDownloadCsv}>
-            ↓ Exportar mês em CSV
+            📊 Exportar planilha do mês
           </button>
           <button type="button" className="danger-outline-btn" onClick={onOpenResetDataModal}>
             Excluir dados

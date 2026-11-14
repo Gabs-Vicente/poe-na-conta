@@ -187,3 +187,55 @@ test('preserva e valida abatimentos avulsos (reimbursements) no backup', () => {
   assert.equal(parsed?.reimbursements?.[0].amount, 64.5)
   assert.equal(parsed?.reimbursements?.[0].participantId, QUICK_THIRD_PARTY_ID)
 })
+
+test('preserva o mês escolhido manualmente em créditos de loja e cartões emprestados', () => {
+  const payloadWithStoreCard = {
+    ...seed,
+    cards: [
+      ...seed.cards,
+      { id: 'shopee-pay', name: 'Shopee Pay', kind: 'store', closingDay: 31, dueDay: 10, closingDayRule: 'after' },
+      { id: 'cartao-mae', name: 'Cartão da Mãe', kind: 'borrowed', closingDay: 31, dueDay: 10, closingDayRule: 'after' },
+    ],
+    expenses: [
+      {
+        id: 'exp-shopee',
+        description: 'Fone Bluetooth Shopee',
+        amount: 120,
+        date: '2026-11-05',
+        category: 'lazer',
+        method: 'Crédito parcelado',
+        cardId: 'shopee-pay',
+        installments: 3,
+        firstMonth: '2026-12',
+        manualFirstMonth: true,
+        shares: [],
+      },
+      {
+        id: 'exp-mae',
+        description: 'Compra no cartão da mãe',
+        amount: 200,
+        date: '2026-11-14',
+        category: 'lazer',
+        method: 'Crédito à vista',
+        cardId: 'cartao-mae',
+        installments: 1,
+        firstMonth: '2026-12',
+        manualFirstMonth: true,
+        shares: [],
+      },
+    ],
+    recurrences: [],
+  }
+  const parsed = parseBackup(createBackup(payloadWithStoreCard))
+  const storeCard = parsed?.cards.find(c => c.id === 'shopee-pay')
+  assert.equal(storeCard?.kind, 'store')
+  const borrowedCard = parsed?.cards.find(c => c.id === 'cartao-mae')
+  assert.equal(borrowedCard?.kind, 'borrowed')
+  const storeExpense = parsed?.expenses.find(e => e.id === 'exp-shopee')
+  assert.equal(storeExpense?.firstMonth, '2026-12')
+  assert.equal(storeExpense?.manualFirstMonth, true)
+  const borrowedExpense = parsed?.expenses.find(e => e.id === 'exp-mae')
+  assert.equal(borrowedExpense?.firstMonth, '2026-12')
+  assert.equal(borrowedExpense?.manualFirstMonth, true)
+})
+

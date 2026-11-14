@@ -900,6 +900,60 @@ footer{color:#89877f}
 .app-shell[data-theme="dark"] .participant-summary-preview-box{background:#1f2822;border-color:#384e3f}
 .app-shell[data-theme="dark"] .participant-summary-preview-label{color:#9fd4b1}
 .app-shell[data-theme="dark"] .participant-summary-preview-box p{color:#e5f2e9}
+.card-kind-selector{display:grid;grid-template-columns:1fr;gap:7px;margin-bottom:13px}
+.card-kind-option{display:flex;align-items:center;gap:11px;padding:9px 12px;border:1px solid #e2dfd7;border-radius:13px;background:#faf9f5;color:#272924;text-align:left;cursor:pointer;transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease}
+.card-kind-option:hover{border-color:#c6c3b8;background:#f4f2ec}
+.card-kind-option.is-selected{border-color:#262924;background:#eef5f0;box-shadow:0 0 0 1px #262924}
+.card-kind-icon{font-size:18px;line-height:1;flex:0 0 auto}
+.card-kind-option b{display:block;font-size:10px;font-weight:700;color:#1e201c}
+.card-kind-option small{display:block;margin-top:2px;font-size:8.5px;line-height:1.35;color:#74766c}
+.store-card-presets{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:4px}
+.store-card-presets>span{font-size:8.5px;font-weight:600;color:#7c7b72}
+.store-preset-chip{border:1px solid #d9d6cc;background:#faf9f5;color:#2c2e29;border-radius:999px;padding:4px 9px;font-size:8.5px;font-weight:600;cursor:pointer;transition:background-color .14s ease,border-color .14s ease}
+.store-preset-chip:hover{background:#eeede6;border-color:#bdbab0}
+.store-preset-chip.is-active{background:#252722;border-color:#252722;color:#fff}
+.store-card-info-box{display:flex;align-items:flex-start;gap:10px;padding:12px 13px;margin-bottom:12px;border:1px solid #d7e5dc;border-radius:13px;background:#f3faf5}
+.store-card-info-box>span{font-size:16px;line-height:1.1}
+.store-card-info-box b{display:block;font-size:10px;font-weight:700;color:#204731;margin-bottom:3px}
+.store-card-info-box p{margin:0;font-size:9px;line-height:1.45;color:#3d5c49}
+.first-month-selector{margin-bottom:11px;padding:10px 12px;border:1px solid #e6e3db;border-radius:13px;background:#faf9f5}
+.first-month-selector-label{display:block;font-size:9.5px;font-weight:700;color:#373832;margin-bottom:7px}
+.first-month-selector-label small{display:block;margin-top:2px;font-size:8.5px;font-weight:400;color:#7a7970}
+.first-month-pills{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:6px}
+.first-month-pill{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:7px 9px;border:1px solid #dedbd2;border-radius:10px;background:#fff;color:#262823;text-align:left;cursor:pointer;transition:border-color .14s ease,background-color .14s ease,box-shadow .14s ease}
+.first-month-pill:hover{border-color:#bdbab0;background:#f5f4ee}
+.first-month-pill.is-selected{border-color:#23583b;background:#edf7f1;box-shadow:0 0 0 1px #23583b}
+.first-month-pill b{font-size:9.5px;font-weight:700;color:#1d1f1b}
+.first-month-pill.is-selected b{color:#1b4b31}
+.first-month-pill small{font-size:8px;color:#78776e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.first-month-pill.is-selected small{color:#35694c}
+.app-shell[data-theme="dark"] .card-kind-option{background:#242620;border-color:#3a3c34;color:#eeece3}
+.app-shell[data-theme="dark"] .card-kind-option:hover{background:#2b2e26;border-color:#4b4e43}
+.app-shell[data-theme="dark"] .card-kind-option.is-selected{background:#233128;border-color:#74b991;box-shadow:0 0 0 1px #74b991}
+.app-shell[data-theme="dark"] .card-kind-option b{color:#f2f0e7}
+.app-shell[data-theme="dark"] .card-kind-option small{color:#a1a095}
+.app-shell[data-theme="dark"] .store-card-presets>span{color:#9d9c92}
+.app-shell[data-theme="dark"] .store-preset-chip{background:#262821;border-color:#3d4036;color:#e6e4db}
+.app-shell[data-theme="dark"] .store-preset-chip:hover{background:#30332a;border-color:#525649}
+.app-shell[data-theme="dark"] .store-preset-chip.is-active{background:#74b991;border-color:#74b991;color:#16211a}
+.app-shell[data-theme="dark"] .store-card-info-box{background:#1f2a23;border-color:#354b3d}
+.app-shell[data-theme="dark"] .store-card-info-box b{color:#a8dfc0}
+.app-shell[data-theme="dark"] .store-card-info-box p{color:#c9dfd1}
+.app-shell[data-theme="dark"] .first-month-selector{background:#242620;border-color:#383a32}
+.app-shell[data-theme="dark"] .first-month-selector-label{color:#eceae1}
+.app-shell[data-theme="dark"] .first-month-selector-label small{color:#9f9e93}
+.app-shell[data-theme="dark"] .first-month-pill{background:#1c1e19;border-color:#363830;color:#eceae1}
+.app-shell[data-theme="dark"] .first-month-pill:hover{background:#282a23;border-color:#4b4e43}
+.app-shell[data-theme="dark"] .first-month-pill.is-selected{background:#223328;border-color:#74b991;box-shadow:0 0 0 1px #74b991}
+.app-shell[data-theme="dark"] .first-month-pill b{color:#f0eee5}
+.app-shell[data-theme="dark"] .first-month-pill.is-selected b{color:#b6e6ca}
+.app-shell[data-theme="dark"] .first-month-pill small{color:#9a998f}
+.app-shell[data-theme="dark"] .first-month-pill.is-selected small{color:#94cfa9}
+.recurrence-review-item-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.export-actions-group{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+@media(max-width:520px){
+  .card-kind-selector{grid-template-columns:1fr}
+}
 @media(max-width:960px){
   .data-summary,.app-shell[data-theme="dark"] .data-summary{grid-template-columns:repeat(2,minmax(0,1fr));padding:14px}
 }

@@ -432,10 +432,16 @@ export function OverviewView({
                 <div className="card-summary-item" key={card.id}>
                   <div className="card-summary-top">
                     <div className="card-summary-title">
-                      <span className="card-icon">▣</span>
+                      <span className="card-icon">{card.kind === 'store' ? '🛍️' : card.kind === 'borrowed' ? '🤝' : '🏦'}</span>
                       <div>
                         <b>{card.name}</b>
-                        <small>Fecha dia {card.closingDay} · Vence dia {card.dueDay}</small>
+                        <small>
+                          {card.kind === 'store'
+                            ? 'Crédito de loja · Mês definido na compra'
+                            : card.kind === 'borrowed'
+                              ? 'Cartão emprestado · Mês definido na compra'
+                              : `Fecha dia ${card.closingDay} · Vence dia ${card.dueDay}`}
+                        </small>
                       </div>
                     </div>
                     <button type="button" className="text-btn card-summary-link" onClick={() => onOpenCardTransactions(card.id)}>

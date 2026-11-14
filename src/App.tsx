@@ -12,6 +12,8 @@ import {
   type InvestmentMoveEditor,
   type ReserveGoalEditor,
 } from './components/modals/InvestmentModals'
+import { BackupTransferScanModal, BackupTransferSendModal } from './components/modals/BackupTransferModals'
+import { decodeBackupTransferText } from './utils/backupTransfer'
 import {
   buildInstallmentRelief,
   buildOccurrences as calculateOccurrences,
@@ -131,6 +133,8 @@ type ModalKind =
   | 'reset'
   | 'confirm'
   | 'pwa-guide'
+  | 'transfer-send'
+  | 'transfer-scan'
 type OnboardingStartMode = 'empty' | 'demo' | 'keep'
 type ConfirmDialog = { eyebrow: string; title: string; description: string; confirmLabel: string; onConfirm: () => void }
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
@@ -299,6 +303,8 @@ function App() {
   const [participantsSectionOpen, setParticipantsSectionOpen] = useState(false)
   const [keepExpenseModalOpen, setKeepExpenseModalOpen] = useState(false)
   const [lastUsedCardId, setLastUsedCardId] = useState(() => localStorage.getItem('poe-na-conta-last-card-id') || '')
+  const [transferSendOpen, setTransferSendOpen] = useState(false)
+  const [transferScanOpen, setTransferScanOpen] = useState(false)
   const expenseDescInputRef = useRef<HTMLInputElement>(null)
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null)
   const swipeStartRef = useRef<{ x: number; y: number; time: number; blocked: boolean } | null>(null)
@@ -341,7 +347,9 @@ function App() {
     resetDataModalOpen ||
     pwaGuideOpen ||
     easterEggOpen ||
-    pendingBackupImport,
+    pendingBackupImport ||
+    transferSendOpen ||
+    transferScanOpen,
   )
 
   const handleMainTouchStart = (event: React.TouchEvent<HTMLElement>) => {
@@ -982,6 +990,29 @@ function App() {
   useEffect(() => {
     localStorage.setItem('poe-na-conta-overview-mode', overviewMode)
   }, [overviewMode])
+  useEffect(() => {
+    const hash = window.location.hash
+    if (!hash.startsWith('#backup=')) return
+    let cancelled = false
+    const loadFromUrl = async () => {
+      const jsonText = await decodeBackupTransferText(hash)
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      if (cancelled || !jsonText) {
+        if (!cancelled) showToast('Link de backup inválido ou corrompido.')
+        return
+      }
+      const parsed = parseBackupFile(jsonText)
+      if (!parsed) {
+        showToast('Não foi possível validar o backup recebido pelo link.')
+        return
+      }
+      setPendingBackupImport(parsed)
+    }
+    void loadFromUrl()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const updateDefaultTheme = (next: 'light' | 'dark') => {
     setDefaultTheme(next)
@@ -2674,6 +2705,8 @@ function App() {
               onRemoveParticipant={removeParticipant}
               onDownloadBackup={downloadBackup}
               onTriggerBackupImport={() => backupInput.current?.click()}
+              onOpenTransferSend={() => setTransferSendOpen(true)}
+              onOpenTransferScan={() => setTransferScanOpen(true)}
               onDownloadCsv={downloadCsv}
               onOpenResetDataModal={openResetDataModal}
             />
@@ -4769,6 +4802,31 @@ function App() {
         clearGoalError={key => clearFieldError(setGoalErrors, key)}
         closeGoalModal={closeGoalModal}
         saveGoal={saveGoal}
+      />
+      <BackupTransferSendModal
+        open={transferSendOpen}
+        closing={closingModal === 'transfer-send'}
+        data={data}
+        preferences={{
+          monthlyLimit,
+          limitNoticePercent: String(limitNoticePercentValue),
+          defaultView: view,
+          theme,
+          profileName,
+          profilePhoto,
+          pixKey,
+        }}
+        onClose={() => closeModalWithAnimation('transfer-send', () => setTransferSendOpen(false))}
+        onToast={showToast}
+      />
+      <BackupTransferScanModal
+        open={transferScanOpen}
+        closing={closingModal === 'transfer-scan'}
+        onClose={() => closeModalWithAnimation('transfer-scan', () => setTransferScanOpen(false))}
+        onBackupDecoded={payload => {
+          setTransferScanOpen(false)
+          setPendingBackupImport(payload)
+        }}
       />
     </div>
   )

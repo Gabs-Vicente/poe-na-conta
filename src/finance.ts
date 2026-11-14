@@ -32,7 +32,23 @@ export type InstallmentReliefSummary = {
   items: InstallmentReliefItem[]
   milestones: InstallmentReliefMilestone[]
 }
-export type Data = { categories: Category[]; cards: Card[]; participants: Participant[]; expenses: Expense[]; recurrences?: Recurrence[] }
+export type ManualReimbursement = {
+  id: string
+  description: string
+  amount: number
+  month: string
+  participantId: string
+  cardId?: string
+  categoryId?: string
+}
+export type Data = {
+  categories: Category[]
+  cards: Card[]
+  participants: Participant[]
+  expenses: Expense[]
+  recurrences?: Recurrence[]
+  reimbursements?: ManualReimbursement[]
+}
 export type BackupPreferences = {
   monthlyLimit: string
   limitNoticePercent: string
@@ -44,7 +60,15 @@ export type BackupPreferences = {
 export type BackupPayload = { data: Data; preferences?: BackupPreferences }
 
 export const seed: Data = {
-  categories: [{ id: 'moradia', name: 'Moradia', color: '#6e7f72' }, { id: 'alimentacao', name: 'Alimentação', color: '#b88b63' }, { id: 'transporte', name: 'Transporte', color: '#74858b' }, { id: 'lazer', name: 'Lazer', color: '#9b8193' }, { id: 'saude', name: 'Saúde', color: '#8b966d' }],
+  categories: [
+    { id: 'moradia', name: 'Moradia', color: '#6e7f72' },
+    { id: 'alimentacao', name: 'Alimentação', color: '#b88b63' },
+    { id: 'transporte', name: 'Transporte', color: '#74858b' },
+    { id: 'uber-99', name: 'Uber/99', color: '#c86558' },
+    { id: 'assinaturas', name: 'Assinaturas', color: '#c49a45' },
+    { id: 'lazer', name: 'Lazer', color: '#9b8193' },
+    { id: 'saude', name: 'Saúde', color: '#8b966d' },
+  ],
   cards: [{ id: 'principal', name: 'Cartão principal', closingDay: 25, dueDay: 5, closingDayRule: 'after' }],
   participants: [],
   expenses: [
@@ -141,6 +165,33 @@ export const buildOccurrences = (expenses: Expense[]): Occurrence[] => expenses.
   return values.map((value, i) => ({ ...expense, part: i + 1, month: shiftMonth(expense.firstMonth, i), value: value / 100, allocatedShares: allocations.map(share => ({ participantId: share.participantId, amount: share.parts[i] / 100 })).filter(share => share.amount > 0) }))
 })
 
+export const QUICK_THIRD_PARTY_ID = '__terceiros__'
+export const QUICK_THIRD_PARTY_NAME = 'Terceiros (avulso)'
+
+export const splitAmountEquallyWithMe = (totalAmount: number, participantCount: number): number[] => {
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0 || participantCount <= 0) return []
+  const totalCents = Math.round(totalAmount * 100)
+  const totalPeople = participantCount + 1
+  const base = Math.floor(totalCents / totalPeople)
+  const remainder = totalCents % totalPeople
+  return Array.from({ length: participantCount }, (_, i) => (base + (i < remainder ? 1 : 0)) / 100)
+}
+
+export const splitAmountAmongParticipantsOnly = (totalAmount: number, participantCount: number): number[] => {
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0 || participantCount <= 0) return []
+  const totalCents = Math.round(totalAmount * 100)
+  const base = Math.floor(totalCents / participantCount)
+  const remainder = totalCents % participantCount
+  return Array.from({ length: participantCount }, (_, i) => (base + (i < remainder ? 1 : 0)) / 100)
+}
+
+export const quickSplitThirdPartyAmount = (totalAmount: number, extraPeopleCount: number): number => {
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0 || extraPeopleCount <= 0) return 0
+  const totalCents = Math.round(totalAmount * 100)
+  const personalCents = Math.floor(totalCents / (extraPeopleCount + 1))
+  return Math.max(0, totalCents - personalCents) / 100
+}
+
 export const occurrencePersonalValue = (occurrence: Pick<Occurrence, 'value' | 'allocatedShares'>): number =>
   Math.max(0, Math.round((occurrence.value - occurrence.allocatedShares.reduce((sum, share) => sum + share.amount, 0)) * 100) / 100)
 
@@ -221,7 +272,15 @@ const coerceInputData = (value: unknown): unknown => {
   const recurrences = Array.isArray(value.recurrences)
     ? value.recurrences.map(item => isRecord(item) ? { ...item, amount: typeof item.amount === 'string' ? parseMoneyInput(item.amount) : item.amount, day: typeof item.day === 'string' ? Number(item.day) : item.day } : item)
     : value.recurrences
-  return { ...value, expenses, ...(recurrences !== undefined ? { recurrences } : {}) }
+  const reimbursements = Array.isArray(value.reimbursements)
+    ? value.reimbursements.map(item => isRecord(item) ? { ...item, amount: typeof item.amount === 'string' ? parseMoneyInput(item.amount) : item.amount } : item)
+    : value.reimbursements
+  return {
+    ...value,
+    expenses,
+    ...(recurrences !== undefined ? { recurrences } : {}),
+    ...(reimbursements !== undefined ? { reimbursements } : {}),
+  }
 }
 
 export const validateData = (value: unknown): value is Data => {
@@ -233,6 +292,8 @@ export const validateData = (value: unknown): value is Data => {
   if (!participants.every(item => isRecord(item) && isText(item.id) && isText(item.name))) return false
   const recurrences = value.recurrences === undefined ? [] : value.recurrences
   if (!Array.isArray(recurrences) || !recurrences.every(item => isRecord(item) && isText(item.id) && isText(item.description) && isFiniteNumber(item.amount) && item.amount > 0 && isText(item.category) && methods.includes(item.method as Method) && isDay(item.day) && typeof item.active === 'boolean' && (item.cardId === undefined || isText(item.cardId)) && Array.isArray(item.generatedMonths) && item.generatedMonths.every(isText) && Array.isArray(item.skippedMonths) && item.skippedMonths.every(isText))) return false
+  const reimbursements = value.reimbursements === undefined ? [] : value.reimbursements
+  if (!Array.isArray(reimbursements) || !reimbursements.every(item => isRecord(item) && isText(item.id) && isText(item.description) && isFiniteNumber(item.amount) && item.amount > 0 && isText(item.month) && /^\d{4}-\d{2}$/.test(item.month) && isText(item.participantId) && (item.cardId === undefined || isText(item.cardId)) && (item.categoryId === undefined || isText(item.categoryId)))) return false
   return value.expenses.every(item => {
     if (!isRecord(item) || !isText(item.id) || !isText(item.description) || !isFiniteNumber(item.amount) || item.amount <= 0 || !isDate(item.date) || !isText(item.category) || !methods.includes(item.method as Method) || !Number.isInteger(item.installments) || Number(item.installments) < 1 || Number(item.installments) > 60 || !isText(item.firstMonth) || !/^\d{4}-\d{2}$/.test(item.firstMonth)) return false
     if (item.cardId !== undefined && !isText(item.cardId)) return false

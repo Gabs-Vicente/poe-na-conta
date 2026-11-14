@@ -20,23 +20,32 @@ import {
   occurrencePersonalValue,
   parseBackupFile,
   parseMoneyInput,
+  QUICK_THIRD_PARTY_ID,
+  QUICK_THIRD_PARTY_NAME,
+  quickSplitThirdPartyAmount,
   readStoredData,
   seed,
   shiftMonth as shiftMonthKey,
+  splitAmountAmongParticipantsOnly,
+  splitAmountEquallyWithMe,
   type BackupPayload,
   type Card,
   type Category,
   type ClosingDayRule,
   type Data,
   type Expense,
+  type ManualReimbursement,
   type Method,
   type Participant,
   type Recurrence,
 } from './finance'
 import {
   blurActiveInputOnTouch,
+  categorySymbol,
   createId,
   dismissKeyboardOnEnter,
+  hexToHsl,
+  hslToHex,
   isTouchDevice,
   money,
   monthName,
@@ -74,13 +83,22 @@ type RecurrenceEditor = {
   cardId: string
   day: string
 }
-type ModalKind = 'expense' | 'recurrence' | 'settings' | 'backup' | 'easter-egg' | 'onboarding' | 'reset' | 'confirm' | 'pwa-guide'
+type ManualReimbursementEditor = {
+  id?: string
+  description: string
+  amount: string
+  participantId: string
+  cardId: string
+  categoryId: string
+}
+type ModalKind = 'expense' | 'recurrence' | 'reimbursement' | 'settings' | 'backup' | 'easter-egg' | 'onboarding' | 'reset' | 'confirm' | 'pwa-guide'
 type OnboardingStartMode = 'empty' | 'demo' | 'keep'
 type ConfirmDialog = { eyebrow: string; title: string; description: string; confirmLabel: string; onConfirm: () => void }
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
 
 const MODAL_CLOSE_DURATION_MS = 220
 const TOAST_AUTO_DISMISS_MS = 3800
+const SWIPE_VIEWS: MainView[] = ['Visão geral', 'Lançamentos', 'Relatórios', 'Recorrências', 'Ajustes']
 const CATEGORY_COLOR_PRESETS = [
   { color: '#6e7f72', label: 'Verde sálvia' },
   { color: '#b88b63', label: 'Terracota suave' },
@@ -205,6 +223,7 @@ function App() {
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
   const [settingsModal, setSettingsModal] = useState<SettingEditor | null>(null)
   const [recurrenceEditor, setRecurrenceEditor] = useState<RecurrenceEditor | null>(null)
+  const [reimbursementEditor, setReimbursementEditor] = useState<ManualReimbursementEditor | null>(null)
   const [recurrenceSelection, setRecurrenceSelection] = useState<string[] | null>(null)
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([])
   const [form, setForm] = useState<ExpenseForm>(() => ({
@@ -221,9 +240,64 @@ function App() {
   const [shareError, setShareError] = useState('')
   const [expenseErrors, setExpenseErrors] = useState<Record<string, string>>({})
   const [recurrenceErrors, setRecurrenceErrors] = useState<Record<string, string>>({})
+  const [reimbursementErrors, setReimbursementErrors] = useState<Record<string, string>>({})
   const [settingsErrors, setSettingsErrors] = useState<Record<string, string>>({})
   const [formShake, setFormShake] = useState<ModalKind | null>(null)
   const [returnToExpenseAfterParticipant, setReturnToExpenseAfterParticipant] = useState(false)
+  const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null)
+  const swipeStartRef = useRef<{ x: number; y: number; time: number; blocked: boolean } | null>(null)
+
+  const hasAnyOpenModal = Boolean(
+    modal ||
+    settingsModal ||
+    recurrenceEditor ||
+    reimbursementEditor ||
+    confirmDialog ||
+    onboardingOpen ||
+    resetDataModalOpen ||
+    pwaGuideOpen ||
+    easterEggOpen ||
+    pendingBackupImport,
+  )
+
+  const handleMainTouchStart = (event: React.TouchEvent<HTMLElement>) => {
+    if (event.touches.length !== 1 || hasAnyOpenModal) {
+      swipeStartRef.current = null
+      return
+    }
+    const target = event.target as HTMLElement | null
+    if (target?.closest('input, select, textarea, .trend-chart, .relief-milestones-bar, [data-no-swipe]')) {
+      swipeStartRef.current = { x: 0, y: 0, time: 0, blocked: true }
+      return
+    }
+    swipeStartRef.current = {
+      x: event.touches[0].clientX,
+      y: event.touches[0].clientY,
+      time: Date.now(),
+      blocked: false,
+    }
+  }
+
+  const handleMainTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
+    const start = swipeStartRef.current
+    swipeStartRef.current = null
+    if (!start || start.blocked || hasAnyOpenModal || event.changedTouches.length !== 1) return
+    const deltaX = event.changedTouches[0].clientX - start.x
+    const deltaY = event.changedTouches[0].clientY - start.y
+    const elapsed = Date.now() - start.time
+    if (Math.abs(deltaX) < 60 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.5 || elapsed > 700) return
+    const currentIndex = SWIPE_VIEWS.indexOf(view)
+    if (currentIndex === -1) return
+    if (deltaX < 0 && currentIndex < SWIPE_VIEWS.length - 1) {
+      setSwipeDirection('left')
+      setView(SWIPE_VIEWS[currentIndex + 1])
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    } else if (deltaX > 0 && currentIndex > 0) {
+      setSwipeDirection('right')
+      setView(SWIPE_VIEWS[currentIndex - 1])
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
 
   const triggerFormShake = (kind: ModalKind) => {
     setFormShake(null)
@@ -247,6 +321,84 @@ function App() {
     form.method.startsWith('Crédito') && selectedFormCard && isDate(normalizedFormDate)
       ? calculateCardDueMonth(normalizedFormDate, selectedFormCard, form.afterClosing)
       : ''
+
+  const parsedFormAmount = parseMoneyInput(form.amount)
+  const validFormAmount = Number.isFinite(parsedFormAmount) && parsedFormAmount > 0 ? parsedFormAmount : 0
+  const totalFormSharesAmount = Math.round(
+    form.shares.reduce((sum, share) => {
+      const val = parseMoneyInput(share.amount)
+      return sum + (Number.isFinite(val) && val > 0 ? val : 0)
+    }, 0) * 100,
+  ) / 100
+  const personalFormPreview = Math.max(0, Math.round((validFormAmount - totalFormSharesAmount) * 100) / 100)
+
+  const clearShareFieldErrors = (ids: string[]) => {
+    setExpenseErrors(current => {
+      const next = { ...current }
+      for (const id of ids) delete next[`share-${id}`]
+      return next
+    })
+  }
+
+  const requireValidAmountForSplit = (): number | null => {
+    if (!validFormAmount) {
+      setExpenseErrors(current => ({ ...current, amount: 'Informe o valor total primeiro para calcular a divisão.' }))
+      triggerFormShake('expense')
+      return null
+    }
+    return validFormAmount
+  }
+
+  const applyEqualSplitWithMe = () => {
+    const amount = requireValidAmountForSplit()
+    if (!amount || form.shares.length === 0) return
+    const values = splitAmountEquallyWithMe(amount, form.shares.length)
+    setShareError('')
+    clearShareFieldErrors(form.shares.map(s => s.participantId))
+    setForm(current => ({
+      ...current,
+      shares: current.shares.map((item, index) => ({
+        ...item,
+        amount: formatMoneyInput(values[index] ?? 0),
+      })),
+    }))
+  }
+
+  const applySplitAmongMarkedOnly = () => {
+    const amount = requireValidAmountForSplit()
+    if (!amount || form.shares.length === 0) return
+    const values = splitAmountAmongParticipantsOnly(amount, form.shares.length)
+    setShareError('')
+    clearShareFieldErrors(form.shares.map(s => s.participantId))
+    setForm(current => ({
+      ...current,
+      shares: current.shares.map((item, index) => ({
+        ...item,
+        amount: formatMoneyInput(values[index] ?? 0),
+      })),
+    }))
+  }
+
+  const applyQuickThirdPartyPreset = (mode: 'plus1' | 'plus2' | 'plus3' | 'full') => {
+    const amount = requireValidAmountForSplit()
+    if (!amount) return
+    const thirdPartyValue =
+      mode === 'full'
+        ? amount
+        : quickSplitThirdPartyAmount(amount, mode === 'plus1' ? 1 : mode === 'plus2' ? 2 : 3)
+    const formatted = formatMoneyInput(thirdPartyValue)
+    setShareError('')
+    clearShareFieldErrors([QUICK_THIRD_PARTY_ID])
+    setForm(current => {
+      const hasQuick = current.shares.some(item => item.participantId === QUICK_THIRD_PARTY_ID)
+      return {
+        ...current,
+        shares: hasQuick
+          ? current.shares.map(item => (item.participantId === QUICK_THIRD_PARTY_ID ? { ...item, amount: formatted } : item))
+          : [{ participantId: QUICK_THIRD_PARTY_ID, amount: formatted, installment: 'all' }, ...current.shares],
+      }
+    })
+  }
 
   const openNewExpenseModal = () => {
     const defaultCard = data.cards[0]
@@ -471,10 +623,16 @@ function App() {
   const owedBy = (e: typeof occurrences[number]) => {
     const shares = e.allocatedShares.filter(share => share.amount > 0)
     const names = shares
-      .map(share => data.participants?.find(participant => participant.id === share.participantId)?.name)
+      .map(share =>
+        share.participantId === QUICK_THIRD_PARTY_ID
+          ? QUICK_THIRD_PARTY_NAME
+          : data.participants?.find(participant => participant.id === share.participantId)?.name,
+      )
       .filter((name): name is string => Boolean(name))
     const amount = shares.reduce((sum, share) => sum + share.amount, 0)
-    return amount ? `${names.length ? names.join(', ') : 'Participante'} ${names.length === 1 ? 'deve' : 'devem'} ${money(amount)}` : ''
+    if (!amount) return ''
+    if (names.length === 1 && names[0] === QUICK_THIRD_PARTY_NAME) return `Terceiros (avulso): ${money(amount)}`
+    return `${names.length ? names.join(', ') : 'Participante'} ${names.length === 1 ? 'deve' : 'devem'} ${money(amount)}`
   }
 
   const filtered = useMemo(() => {
@@ -521,23 +679,44 @@ function App() {
   const filteredExpenseIds = Array.from(new Set(filtered.map(e => e.id)))
   const selectedVisibleIds = filteredExpenseIds.filter(id => selectedExpenseIds.includes(id))
   const allVisibleSelected = filteredExpenseIds.length > 0 && selectedVisibleIds.length === filteredExpenseIds.length
-  const total = currentExpenses.reduce((sum, e) => sum + personalValue(e), 0)
+  const allReimbursements = data.reimbursements || []
+  const currentReimbursements = allReimbursements.filter(r => r.month === month)
+  const manualReimbursementTotal = Math.round(currentReimbursements.reduce((sum, r) => sum + r.amount, 0) * 100) / 100
+  const rawPersonalTotal = currentExpenses.reduce((sum, e) => sum + personalValue(e), 0)
+  const total = Math.max(0, Math.round((rawPersonalTotal - manualReimbursementTotal) * 100) / 100)
   const monthlyLimitValue = Math.max(0, Number(monthlyLimit) || 0)
   const limitNoticePercentValue = Math.min(100, Math.max(1, Number(limitNoticePercent) || 80))
   const monthlyLimitProgress = monthlyLimitValue ? (total / monthlyLimitValue) * 100 : 0
   const monthlyLimitNotice = monthlyLimitValue > 0 && total >= (monthlyLimitValue * limitNoticePercentValue) / 100
-  const reimbursementTotal = currentExpenses.reduce((sum, e) => sum + e.allocatedShares.reduce((shareSum, share) => shareSum + share.amount, 0), 0)
+  const reimbursementTotal =
+    Math.round(
+      (currentExpenses.reduce((sum, e) => sum + e.allocatedShares.reduce((shareSum, share) => shareSum + share.amount, 0), 0) + manualReimbursementTotal) * 100,
+    ) / 100
   const categoryTotals = data.categories
-    .map(c => ({ ...c, total: currentExpenses.filter(e => e.category === c.id).reduce((s, e) => s + personalValue(e), 0) }))
+    .map(c => {
+      const catExpensesPersonal = currentExpenses.filter(e => e.category === c.id).reduce((s, e) => s + personalValue(e), 0)
+      const catManualOffset = currentReimbursements.filter(r => r.categoryId === c.id).reduce((s, r) => s + r.amount, 0)
+      return { ...c, total: Math.max(0, Math.round((catExpensesPersonal - catManualOffset) * 100) / 100) }
+    })
     .filter(c => c.total > 0)
     .sort((a, b) => b.total - a.total)
-  const reimbursementByParticipant = (data.participants || [])
+  const reimbursementByParticipant = [...(data.participants || []), { id: QUICK_THIRD_PARTY_ID, name: QUICK_THIRD_PARTY_NAME }]
     .map(participant => ({
       participant,
-      current: currentExpenses.reduce((sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id).reduce((a, s) => a + s.amount, 0), 0),
-      future: occurrences
-        .filter(e => e.month > month)
-        .reduce((sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id).reduce((a, s) => a + s.amount, 0), 0),
+      current:
+        Math.round(
+          (currentExpenses.reduce((sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id).reduce((a, s) => a + s.amount, 0), 0) +
+            currentReimbursements.filter(r => r.participantId === participant.id).reduce((s, r) => s + r.amount, 0)) *
+            100,
+        ) / 100,
+      future:
+        Math.round(
+          (occurrences
+            .filter(e => e.month > month)
+            .reduce((sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id).reduce((a, s) => a + s.amount, 0), 0) +
+            allReimbursements.filter(r => r.month > month && r.participantId === participant.id).reduce((s, r) => s + r.amount, 0)) *
+            100,
+        ) / 100,
     }))
     .filter(x => x.current > 0 || x.future > 0)
   const nextMonths = Array.from({ length: 5 }, (_, i) => shiftMonthKey(month, i))
@@ -546,8 +725,11 @@ function App() {
     const cardOccurrences = currentExpenses.filter(e => e.method.startsWith('Crédito') && (e.cardId || data.cards[0]?.id) === card.id)
     const nextCardOccurrences = occurrences.filter(e => e.month === nextMonthKey && e.method.startsWith('Crédito') && (e.cardId || data.cards[0]?.id) === card.id)
     const invoiceTotal = cardOccurrences.reduce((sum, e) => sum + e.value, 0)
-    const personalPart = cardOccurrences.reduce((sum, e) => sum + personalValue(e), 0)
-    const sharedPart = cardOccurrences.reduce((sum, e) => sum + e.allocatedShares.reduce((s, sh) => s + sh.amount, 0), 0)
+    const rawCardPersonal = cardOccurrences.reduce((sum, e) => sum + personalValue(e), 0)
+    const rawCardShared = cardOccurrences.reduce((sum, e) => sum + e.allocatedShares.reduce((s, sh) => s + sh.amount, 0), 0)
+    const manualCardOffset = currentReimbursements.filter(r => r.cardId === card.id).reduce((s, r) => s + r.amount, 0)
+    const personalPart = Math.max(0, Math.round((rawCardPersonal - manualCardOffset) * 100) / 100)
+    const sharedPart = Math.round((rawCardShared + manualCardOffset) * 100) / 100
     const nextInvoiceTotal = nextCardOccurrences.reduce((sum, e) => sum + e.value, 0)
     return { card, invoiceTotal, personalPart, sharedPart, count: cardOccurrences.length, nextInvoiceTotal }
   })
@@ -571,7 +753,8 @@ function App() {
       : ''
   const previousMonth = shiftMonthKey(month, -1)
   const previousMonthOccurrences = occurrences.filter(e => e.month === previousMonth)
-  const previousTotal = previousMonthOccurrences.reduce((s, e) => s + personalValue(e), 0)
+  const previousMonthManualOffset = allReimbursements.filter(r => r.month === previousMonth).reduce((s, r) => s + r.amount, 0)
+  const previousTotal = Math.max(0, Math.round((previousMonthOccurrences.reduce((s, e) => s + personalValue(e), 0) - previousMonthManualOffset) * 100) / 100)
   const monthChange = previousTotal ? ((total - previousTotal) / previousTotal) * 100 : null
   const upcomingTotal = occurrences.filter(e => e.month > month).reduce((s, e) => s + personalValue(e), 0)
   const installmentRelief = useMemo(() => buildInstallmentRelief(occurrences, month), [occurrences, month])
@@ -579,8 +762,15 @@ function App() {
   const reportCategoryRanking = data.categories
     .map(category => {
       const items = currentExpenses.filter(e => e.category === category.id)
-      const catTotal = items.reduce((s, e) => s + personalValue(e), 0)
-      const prevCatTotal = previousMonthOccurrences.filter(e => e.category === category.id).reduce((s, e) => s + personalValue(e), 0)
+      const catManualOffset = currentReimbursements.filter(r => r.categoryId === category.id).reduce((s, r) => s + r.amount, 0)
+      const prevCatManualOffset = allReimbursements
+        .filter(r => r.month === previousMonth && r.categoryId === category.id)
+        .reduce((s, r) => s + r.amount, 0)
+      const catTotal = Math.max(0, Math.round((items.reduce((s, e) => s + personalValue(e), 0) - catManualOffset) * 100) / 100)
+      const prevCatTotal = Math.max(
+        0,
+        Math.round((previousMonthOccurrences.filter(e => e.category === category.id).reduce((s, e) => s + personalValue(e), 0) - prevCatManualOffset) * 100) / 100,
+      )
       const percentage = total > 0 ? Math.round((catTotal / total) * 100) : 0
       const diffPercent = prevCatTotal > 0 ? Math.round(((catTotal - prevCatTotal) / prevCatTotal) * 100) : null
       return { ...category, count: items.length, total: catTotal, prevTotal: prevCatTotal, percentage, diffPercent }
@@ -596,7 +786,7 @@ function App() {
     return { method: methodName, count: items.length, personalTotal: methodPersonal, grossTotal: methodGross, percentage, isCredit: methodName.startsWith('Crédito') }
   })
   const directPersonalTotal = reportMethods.filter(m => !m.isCredit).reduce((s, m) => s + m.personalTotal, 0)
-  const creditPersonalTotal = reportMethods.filter(m => m.isCredit).reduce((s, m) => s + m.personalTotal, 0)
+  const creditPersonalTotal = Math.max(0, Math.round((reportMethods.filter(m => m.isCredit).reduce((s, m) => s + m.personalTotal, 0) - manualReimbursementTotal) * 100) / 100)
   const directSharePercent = total > 0 ? Math.round((directPersonalTotal / total) * 100) : 0
   const creditSharePercent = total > 0 ? Math.max(0, 100 - directSharePercent) : 0
   const installmentOccurrences = currentExpenses.filter(e => e.installments > 1)
@@ -609,7 +799,9 @@ function App() {
   const activeTrendYear = trendYears.includes(trendYear) ? trendYear : trendYears.includes(currentYear) ? currentYear : trendYears[0] || currentYear
   const monthlyTrend = Array.from({ length: 12 }, (_, i) => {
     const key = `${activeTrendYear}-${String(i + 1).padStart(2, '0')}`
-    return { month: key, total: occurrences.filter(e => e.month === key).reduce((s, e) => s + personalValue(e), 0) }
+    const monthManualOffset = allReimbursements.filter(r => r.month === key).reduce((s, r) => s + r.amount, 0)
+    const rawMonthPersonal = occurrences.filter(e => e.month === key).reduce((s, e) => s + personalValue(e), 0)
+    return { month: key, total: Math.max(0, Math.round((rawMonthPersonal - monthManualOffset) * 100) / 100) }
   })
   const trendYearTotal = monthlyTrend.reduce((sum, item) => sum + item.total, 0)
 
@@ -1015,7 +1207,13 @@ function App() {
         e.month,
         data.categories.find(c => c.id === e.category)?.name || '',
         e.method,
-        e.allocatedShares.map(share => data.participants?.find(p => p.id === share.participantId)?.name || 'Participante').join(', '),
+        e.allocatedShares
+          .map(share =>
+            share.participantId === QUICK_THIRD_PARTY_ID
+              ? QUICK_THIRD_PARTY_NAME
+              : data.participants?.find(p => p.id === share.participantId)?.name || 'Participante',
+          )
+          .join(', '),
       ]),
     ]
     const untrustedColumns = new Set([0, 6, 7, 8])
@@ -1283,6 +1481,7 @@ function App() {
             ...data,
             participants: (data.participants || []).filter(p => p.id !== id),
             expenses: data.expenses.map(e => ({ ...e, shares: (e.shares || []).filter(share => share.participantId !== id) })),
+            ...(data.reimbursements ? { reimbursements: data.reimbursements.filter(r => r.participantId !== id) } : {}),
           })
         ) {
           showToast('Participante removido.')
@@ -1290,6 +1489,66 @@ function App() {
         closeConfirmDialog()
       },
     })
+  }
+
+  const openManualReimbursement = (item?: ManualReimbursement) => {
+    setReimbursementErrors({})
+    const defaultUberCat =
+      data.categories.find(c => c.id === 'cat-uber' || c.name.toLowerCase().includes('uber'))?.id || ''
+    setReimbursementEditor({
+      id: item?.id,
+      description: item?.description || '',
+      amount: item ? formatMoneyInput(item.amount) : '',
+      participantId: item?.participantId || QUICK_THIRD_PARTY_ID,
+      cardId: item ? item.cardId || '' : data.cards[0]?.id || '',
+      categoryId: item ? item.categoryId || '' : defaultUberCat,
+    })
+  }
+
+  const closeManualReimbursementModal = () =>
+    closeModalWithAnimation('reimbursement', () => {
+      setReimbursementEditor(null)
+      setReimbursementErrors({})
+    })
+
+  const saveManualReimbursement = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!reimbursementEditor) return
+    const nextErrors: Record<string, string> = {}
+    const description = reimbursementEditor.description.trim()
+    if (!description) nextErrors.description = 'Informe uma descrição curta (ex.: Uber com amigos).'
+    const amount = parseMoneyInput(reimbursementEditor.amount)
+    if (!reimbursementEditor.amount.trim()) nextErrors.amount = 'Informe o valor recebido/abatido.'
+    else if (!Number.isFinite(amount) || amount <= 0) nextErrors.amount = 'Informe um valor maior que zero (ex.: 45,00).'
+    if (Object.keys(nextErrors).length > 0) {
+      setReimbursementErrors(nextErrors)
+      triggerFormShake('reimbursement')
+      return
+    }
+    setReimbursementErrors({})
+    const existingList = data.reimbursements || []
+    const previous = reimbursementEditor.id ? existingList.find(r => r.id === reimbursementEditor.id) : undefined
+    const entry: ManualReimbursement = {
+      id: reimbursementEditor.id || createId(),
+      description,
+      amount: Math.round(amount * 100) / 100,
+      month: previous?.month || month,
+      participantId: reimbursementEditor.participantId || QUICK_THIRD_PARTY_ID,
+      ...(reimbursementEditor.cardId ? { cardId: reimbursementEditor.cardId } : {}),
+      ...(reimbursementEditor.categoryId ? { categoryId: reimbursementEditor.categoryId } : {}),
+    }
+    const updatedList = reimbursementEditor.id ? existingList.map(r => (r.id === entry.id ? entry : r)) : [entry, ...existingList]
+    if (save({ ...data, reimbursements: updatedList })) {
+      showToast(reimbursementEditor.id ? 'Abatimento avulso atualizado.' : 'Abatimento avulso aplicado no mês.')
+      closeManualReimbursementModal()
+    }
+  }
+
+  const deleteManualReimbursement = (id: string) => {
+    const existingList = data.reimbursements || []
+    if (save({ ...data, reimbursements: existingList.filter(r => r.id !== id) })) {
+      showToast('Abatimento avulso removido.')
+    }
   }
 
   const transactionTable = (
@@ -1429,13 +1688,13 @@ function App() {
           </div>
         </div>
       </header>
-      <main className="main">
+      <main className="main" onTouchStart={handleMainTouchStart} onTouchEnd={handleMainTouchEnd}>
         <header className="topbar">
           <div className="breadcrumb">
             Põe na Conta <span>/</span> {view}
           </div>
         </header>
-        <div className="content" key={view}>
+        <div className={`content ${swipeDirection ? `swipe-from-${swipeDirection}` : ''}`} key={view}>
           <div className="heading-row">
             <div>
               <div className="eyebrow">
@@ -1649,6 +1908,7 @@ function App() {
             <OverviewView
               data={data}
               month={month}
+              theme={theme}
               previousMonth={previousMonth}
               total={total}
               monthChange={monthChange}
@@ -1672,6 +1932,7 @@ function App() {
               installmentRelief={installmentRelief}
               cardSummaries={cardSummaries}
               reimbursementByParticipant={reimbursementByParticipant}
+              currentReimbursements={currentReimbursements}
               onTrendYearChange={setTrendYear}
               onCategoryPanelModeChange={setCategoryPanelMode}
               onHoveredCategoryIdChange={setHoveredCategoryId}
@@ -1681,6 +1942,8 @@ function App() {
                 openCard()
               }}
               onOpenNewExpenseModal={openNewExpenseModal}
+              onOpenManualReimbursement={openManualReimbursement}
+              onDeleteManualReimbursement={deleteManualReimbursement}
               onNavigateView={setView}
               personalValue={personalValue}
               owedBy={owedBy}
@@ -1925,9 +2188,123 @@ function App() {
             )}
             <fieldset className="participants-field">
               <legend>Alguém precisa te pagar?</legend>
+              <p>Use o <b>Modo rápido</b> para dividir corridas/contas sem cadastrar ninguém ou selecione pessoas abaixo.</p>
+              {(() => {
+                const quickShare = form.shares.find(item => item.participantId === QUICK_THIRD_PARTY_ID)
+                const quickErrorKey = `share-${QUICK_THIRD_PARTY_ID}`
+                const quickError = expenseErrors[quickErrorKey]
+                return (
+                  <div className={`quick-third-party-box ${quickShare ? 'is-active' : ''}`}>
+                    <div className="quick-third-party-head">
+                      <label className="participant-check">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(quickShare)}
+                          onChange={e => {
+                            blurActiveInputOnTouch()
+                            setShareError('')
+                            clearFieldError(setExpenseErrors, quickErrorKey)
+                            setForm({
+                              ...form,
+                              shares: e.target.checked
+                                ? [{ participantId: QUICK_THIRD_PARTY_ID, amount: '', installment: 'all' }, ...form.shares]
+                                : form.shares.filter(item => item.participantId !== QUICK_THIRD_PARTY_ID),
+                            })
+                          }}
+                        />
+                        <span>⚡ Terceiros (modo rápido sem cadastro)</span>
+                      </label>
+                      <div className="quick-split-pills" role="group" aria-label="Atalhos de divisão rápida">
+                        <button type="button" className="split-pill-btn" onClick={() => applyQuickThirdPartyPreset('plus1')} title="Dividir entre você e +1 pessoa (50% terceiros)">
+                          ÷ 2 comigo
+                        </button>
+                        <button type="button" className="split-pill-btn" onClick={() => applyQuickThirdPartyPreset('plus2')} title="Dividir entre você e +2 pessoas (2/3 terceiros)">
+                          ÷ 3 comigo
+                        </button>
+                        <button type="button" className="split-pill-btn" onClick={() => applyQuickThirdPartyPreset('plus3')} title="Dividir entre você e +3 pessoas (3/4 terceiros)">
+                          ÷ 4 comigo
+                        </button>
+                        <button type="button" className="split-pill-btn" onClick={() => applyQuickThirdPartyPreset('full')} title="100% pago por terceiros">
+                          100% terceiros
+                        </button>
+                      </div>
+                    </div>
+                    {quickShare && (
+                      <div className="participant-share-controls quick-share-controls">
+                        <label className={`participant-amount ${quickError ? 'is-invalid' : ''}`}>
+                          Valor de terceiros
+                          <div className="money-input-wrap compact">
+                            <span className="money-prefix" aria-hidden="true">R$</span>
+                            <input
+                              aria-label="Valor que terceiros devem pagar"
+                              aria-invalid={Boolean(quickError)}
+                              type="text"
+                              inputMode="decimal"
+                              enterKeyHint="done"
+                              onKeyDown={dismissKeyboardOnEnter}
+                              placeholder="0,00"
+                              value={quickShare.amount}
+                              onChange={e => {
+                                clearFieldError(setExpenseErrors, quickErrorKey)
+                                setShareError('')
+                                setForm({
+                                  ...form,
+                                  shares: form.shares.map(item =>
+                                    item.participantId === QUICK_THIRD_PARTY_ID ? { ...item, amount: formatMoneyInput(e.target.value) } : item,
+                                  ),
+                                })
+                              }}
+                            />
+                          </div>
+                          {quickError && (
+                            <small className="field-error-msg" role="alert">
+                              {quickError}
+                            </small>
+                          )}
+                        </label>
+                        {form.method === 'Crédito parcelado' && (
+                          <label className="participant-scope">
+                            Cobrança
+                            <select
+                              aria-label="Parcelas de terceiros (modo rápido)"
+                              value={quickShare.installment}
+                              onFocus={blurActiveInputOnTouch}
+                              onChange={e =>
+                                setForm({
+                                  ...form,
+                                  shares: form.shares.map(item =>
+                                    item.participantId === QUICK_THIRD_PARTY_ID ? { ...item, installment: e.target.value } : item,
+                                  ),
+                                })
+                              }
+                            >
+                              <option value="all">Todas</option>
+                              {Array.from({ length: Math.max(2, Number(form.installments) || 2) }, (_, i) => (
+                                <option key={i + 1} value={i + 1}>Só {i + 1}ª parcela</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+              {form.shares.length > 0 && (
+                <div className="split-actions-bar">
+                  <span>Dividir entre marcados:</span>
+                  <div className="split-actions-buttons">
+                    <button type="button" className="split-action-btn" onClick={applyEqualSplitWithMe}>
+                      ÷ Igual comigo ({form.shares.length + 1} partes)
+                    </button>
+                    <button type="button" className="split-action-btn" onClick={applySplitAmongMarkedOnly}>
+                      100% entre marcados ({form.shares.length})
+                    </button>
+                  </div>
+                </div>
+              )}
               {(data.participants || []).length ? (
                 <>
-                  <p>Informe quanto essa pessoa deve. Em compras parceladas, você pode atribuir o valor a todas as parcelas ou apenas a uma.</p>
                   {(data.participants || []).map(participant => {
                     const share = form.shares.find(item => item.participantId === participant.id)
                     const shareErrorKey = `share-${participant.id}`
@@ -2012,15 +2389,26 @@ function App() {
                     )
                   })}
                   <button type="button" className="inline-participant-btn" onClick={addParticipantFromExpense}>
-                    ＋ Adicionar outra pessoa
+                    ＋ Cadastrar outra pessoa com nome
                   </button>
                 </>
               ) : (
                 <div className="participants-empty">
-                  Ainda não há pessoas cadastradas.{' '}
+                  Quer acompanhar por nome quem te deve?{' '}
                   <button type="button" className="inline-participant-btn" onClick={addParticipantFromExpense}>
-                    ＋ Adicionar pessoa
+                    ＋ Cadastrar pessoa
                   </button>
+                </div>
+              )}
+              {validFormAmount > 0 && form.shares.length > 0 && (
+                <div className={`split-live-summary ${totalFormSharesAmount > validFormAmount ? 'is-over' : ''}`} role="status">
+                  <span>Total: <b>{money(validFormAmount)}</b></span>
+                  <span>Terceiros: <b>{money(totalFormSharesAmount)}</b></span>
+                  <span className="split-live-personal">
+                    {totalFormSharesAmount > validFormAmount
+                      ? `Excede o total em ${money(totalFormSharesAmount - validFormAmount)}`
+                      : `Sua parte: ${money(personalFormPreview)}`}
+                  </span>
                 </div>
               )}
               {shareError && (
@@ -2263,54 +2651,122 @@ function App() {
             </label>
             {settingsModal.kind === 'category' ? (
               <div className={`category-color-field ${settingsErrors.color ? 'is-invalid' : ''}`}>
-                <span className="category-color-label">Cor da categoria</span>
-                <div className="color-swatch-grid" role="radiogroup" aria-label="Paleta de cores da categoria">
-                  {CATEGORY_COLOR_PRESETS.map(preset => {
-                    const isSelected = settingsModal.color.toLowerCase() === preset.color.toLowerCase()
-                    return (
-                      <button
-                        key={preset.color}
-                        type="button"
-                        role="radio"
-                        aria-checked={isSelected}
-                        aria-label={preset.label}
-                        title={preset.label}
-                        className={`color-swatch ${isSelected ? 'is-selected' : ''}`}
-                        style={{ backgroundColor: preset.color }}
-                        onClick={() => {
-                          clearFieldError(setSettingsErrors, 'color')
-                          setSettingsModal(current => (current ? { ...current, color: preset.color } : current))
-                        }}
-                      >
-                        {isSelected && <span aria-hidden="true">✓</span>}
-                      </button>
-                    )
-                  })}
-                </div>
-                <label className={`custom-hex-row ${settingsErrors.color ? 'is-invalid' : ''}`}>
-                  <span
-                    className="custom-hex-preview"
-                    style={{ backgroundColor: /^#[0-9a-fA-F]{6}$/.test(settingsModal.color) ? settingsModal.color : '#6e7f72' }}
-                    aria-hidden="true"
-                  />
-                  <span className="custom-hex-caption">Código da cor (HEX)</span>
-                  <input
-                    type="text"
-                    maxLength={7}
-                    enterKeyHint="done"
-                    onKeyDown={dismissKeyboardOnEnter}
-                    aria-label="Código hexadecimal da cor"
-                    aria-invalid={Boolean(settingsErrors.color)}
-                    placeholder="#6E7F72"
-                    value={settingsModal.color.toUpperCase()}
-                    onChange={e => {
-                      clearFieldError(setSettingsErrors, 'color')
-                      const raw = e.target.value.replace(/[^#0-9a-fA-F]/g, '')
-                      const next = raw.startsWith('#') ? `#${raw.slice(1).replace(/#/g, '').slice(0, 6)}` : `#${raw.replace(/#/g, '').slice(0, 6)}`
-                      setSettingsModal(current => (current ? { ...current, color: next } : current))
-                    }}
-                  />
-                </label>
+                {(() => {
+                  const safeColor = /^#[0-9a-fA-F]{6}$/.test(settingsModal.color) ? settingsModal.color : '#6e7f72'
+                  const hsl = hexToHsl(safeColor)
+                  const applyHsl = (nextH: number, nextS: number, nextL: number) => {
+                    clearFieldError(setSettingsErrors, 'color')
+                    const nextHex = hslToHex(nextH, nextS, nextL)
+                    setSettingsModal(current => (current ? { ...current, color: nextHex } : current))
+                  }
+                  return (
+                    <>
+                      <div className="category-modal-preview" aria-label="Prévia da categoria">
+                        <span className="category-icon" style={{ color: safeColor, background: `${safeColor}22` }}>
+                          {categorySymbol(settingsModal.id, settingsModal.name)}
+                        </span>
+                        <div className="category-modal-preview-text">
+                          <b>{settingsModal.name.trim() || 'Prévia da categoria'}</b>
+                          <small>O ícone se adapta automaticamente ao nome (ex.: TCG, Games, Uber/99, Assinaturas)</small>
+                        </div>
+                        <span className="category-label">
+                          <i style={{ background: safeColor }} />
+                          {settingsModal.name.trim() || 'Categoria'}
+                        </span>
+                      </div>
+                      <span className="category-color-label">Cores sugeridas</span>
+                      <div className="color-swatch-grid" role="radiogroup" aria-label="Paleta de cores da categoria">
+                        {CATEGORY_COLOR_PRESETS.map(preset => {
+                          const isSelected = settingsModal.color.toLowerCase() === preset.color.toLowerCase()
+                          return (
+                            <button
+                              key={preset.color}
+                              type="button"
+                              role="radio"
+                              aria-checked={isSelected}
+                              aria-label={preset.label}
+                              title={preset.label}
+                              className={`color-swatch ${isSelected ? 'is-selected' : ''}`}
+                              style={{ backgroundColor: preset.color }}
+                              onClick={() => {
+                                clearFieldError(setSettingsErrors, 'color')
+                                setSettingsModal(current => (current ? { ...current, color: preset.color } : current))
+                              }}
+                            >
+                              {isSelected && <span aria-hidden="true">✓</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <div className="visual-color-picker" data-no-swipe="true">
+                        <div className="visual-color-head">
+                          <span className="category-color-label">Cor personalizada (arraste para escolher)</span>
+                          <div className="tone-pills" role="group" aria-label="Tom da cor">
+                            {[
+                              { label: 'Suave', s: 36, l: 58 },
+                              { label: 'Equilibrado', s: 52, l: 50 },
+                              { label: 'Vibrante', s: 78, l: 54 },
+                              { label: 'Intenso', s: 65, l: 40 },
+                            ].map(tone => {
+                              const isToneActive = Math.abs(hsl.s - tone.s) <= 10 && Math.abs(hsl.l - tone.l) <= 7
+                              return (
+                                <button
+                                  key={tone.label}
+                                  type="button"
+                                  className={`tone-pill-btn ${isToneActive ? 'is-active' : ''}`}
+                                  onClick={() => applyHsl(hsl.h, tone.s, tone.l)}
+                                >
+                                  {tone.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                        <input
+                          type="range"
+                          className="hue-slider"
+                          aria-label="Escolher matiz da cor"
+                          min={0}
+                          max={360}
+                          value={hsl.h}
+                          onChange={e => applyHsl(Number(e.target.value), Math.max(35, hsl.s || 55), Math.min(62, Math.max(38, hsl.l || 50)))}
+                        />
+                        <div className={`custom-hex-row ${settingsErrors.color ? 'is-invalid' : ''}`}>
+                          <label className="native-color-picker-btn" title="Abrir roda de cores do sistema">
+                            <input
+                              type="color"
+                              aria-label="Abrir seletor visual de cores"
+                              value={safeColor}
+                              onChange={e => {
+                                clearFieldError(setSettingsErrors, 'color')
+                                setSettingsModal(current => (current ? { ...current, color: e.target.value.toLowerCase() } : current))
+                              }}
+                            />
+                            <span className="custom-hex-preview" style={{ backgroundColor: safeColor }} aria-hidden="true" />
+                            <span>Abrir seletor visual</span>
+                          </label>
+                          <input
+                            type="text"
+                            className="hex-code-input"
+                            maxLength={7}
+                            enterKeyHint="done"
+                            onKeyDown={dismissKeyboardOnEnter}
+                            aria-label="Código hexadecimal da cor (opcional)"
+                            aria-invalid={Boolean(settingsErrors.color)}
+                            placeholder="#6E7F72"
+                            value={settingsModal.color.toUpperCase()}
+                            onChange={e => {
+                              clearFieldError(setSettingsErrors, 'color')
+                              const raw = e.target.value.replace(/[^#0-9a-fA-F]/g, '')
+                              const next = raw.startsWith('#') ? `#${raw.slice(1).replace(/#/g, '').slice(0, 6)}` : `#${raw.replace(/#/g, '').slice(0, 6)}`
+                              setSettingsModal(current => (current ? { ...current, color: next } : current))
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )
+                })()}
                 {settingsErrors.color && (
                   <small className="field-error-msg" role="alert">
                     {settingsErrors.color}
@@ -2769,6 +3225,145 @@ function App() {
               </div>
             </form>
           )}
+        </div>
+      )}
+
+      {reimbursementEditor && (
+        <div
+          className={`modal-backdrop ${closingModal === 'reimbursement' ? 'is-closing' : ''}`}
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) closeManualReimbursementModal()
+          }}
+        >
+          <form
+            noValidate
+            className={`modal reimbursement-modal ${formShake === 'reimbursement' ? 'is-shaking' : ''}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reimbursement-modal-title"
+            onSubmit={saveManualReimbursement}
+            onAnimationEnd={event => {
+              if (event.animationName === 'nexus-modal-shake') setFormShake(null)
+            }}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">ABATIMENTO DE RACHA ({monthName(month).toUpperCase()})</span>
+                <h2 id="reimbursement-modal-title">
+                  {reimbursementEditor.id ? 'Editar valor avulso' : 'Abater valor avulso'}
+                </h2>
+              </div>
+              <button type="button" aria-label="Fechar abatimento" onClick={closeManualReimbursementModal}>
+                ×
+              </button>
+            </div>
+            <p className="form-help participant-modal-help">
+              Ideal para quando você rachou várias despesas (como corridas de Uber) e recebeu o PIX somado, mas não lembra quais lançamentos específicos dividir. O valor será <b>descontado da sua parte pessoal</b> neste mês.
+            </p>
+            <label className={reimbursementErrors.description ? 'is-invalid' : ''}>
+              Descrição / Motivo
+              <input
+                autoFocus={!isTouchDevice()}
+                enterKeyHint="done"
+                onKeyDown={dismissKeyboardOnEnter}
+                aria-invalid={Boolean(reimbursementErrors.description)}
+                placeholder="Ex.: Racha dos Ubers da semana, PIX do almoço..."
+                value={reimbursementEditor.description}
+                onChange={e => {
+                  clearFieldError(setReimbursementErrors, 'description')
+                  setReimbursementEditor({ ...reimbursementEditor, description: e.target.value })
+                }}
+              />
+              {reimbursementErrors.description && (
+                <small className="field-error-msg" role="alert">
+                  {reimbursementErrors.description}
+                </small>
+              )}
+            </label>
+            <div className="form-row">
+              <label className={reimbursementErrors.amount ? 'is-invalid' : ''}>
+                Valor a abater
+                <div className="money-input-wrap">
+                  <span className="money-prefix" aria-hidden="true">R$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    enterKeyHint="done"
+                    onKeyDown={dismissKeyboardOnEnter}
+                    aria-invalid={Boolean(reimbursementErrors.amount)}
+                    placeholder="0,00"
+                    value={reimbursementEditor.amount}
+                    onChange={e => {
+                      clearFieldError(setReimbursementErrors, 'amount')
+                      setReimbursementEditor({ ...reimbursementEditor, amount: formatMoneyInput(e.target.value) })
+                    }}
+                  />
+                </div>
+                {reimbursementErrors.amount && (
+                  <small className="field-error-msg" role="alert">
+                    {reimbursementErrors.amount}
+                  </small>
+                )}
+              </label>
+              <label>
+                Quem pagou / racha
+                <select
+                  value={reimbursementEditor.participantId}
+                  onFocus={blurActiveInputOnTouch}
+                  onChange={e => setReimbursementEditor({ ...reimbursementEditor, participantId: e.target.value })}
+                >
+                  <option value={QUICK_THIRD_PARTY_ID}>⚡ {QUICK_THIRD_PARTY_NAME} (sem cadastro)</option>
+                  {(data.participants || []).map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="form-row">
+              <label>
+                Abater da fatura do cartão (opcional)
+                <select
+                  value={reimbursementEditor.cardId}
+                  onFocus={blurActiveInputOnTouch}
+                  onChange={e => setReimbursementEditor({ ...reimbursementEditor, cardId: e.target.value })}
+                >
+                  <option value="">Nenhum (apenas no total do mês)</option>
+                  {data.cards.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <small className="form-help">Reduz a &ldquo;Sua parte&rdquo; no resumo desse cartão.</small>
+              </label>
+              <label>
+                Abater de qual categoria? (opcional)
+                <select
+                  value={reimbursementEditor.categoryId}
+                  onFocus={blurActiveInputOnTouch}
+                  onChange={e => setReimbursementEditor({ ...reimbursementEditor, categoryId: e.target.value })}
+                >
+                  <option value="">Nenhuma (apenas no total geral)</option>
+                  {data.categories.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <small className="form-help">Desconta o valor do gráfico dessa categoria.</small>
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="cancel-btn" onClick={closeManualReimbursementModal}>
+                Cancelar
+              </button>
+              <button className="primary" type="submit">
+                {reimbursementEditor.id ? 'Salvar alterações' : 'Aplicar abatimento'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

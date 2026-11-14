@@ -1,6 +1,6 @@
 import type React from 'react'
 import { formatMoneyInput, parseMoneyInput, type Card, type Category, type Data, type Participant } from '../finance'
-import { dismissKeyboardOnEnter, type MainView } from '../utils/format'
+import { categorySymbol, dismissKeyboardOnEnter, type MainView } from '../utils/format'
 
 type SettingsViewProps = {
   data: Data
@@ -194,7 +194,9 @@ export function SettingsView({
         </div>
         {data.categories.map(c => (
           <div className="setting-row" key={c.id}>
-            <i className="dot" style={{ background: c.color }} />
+            <span className="category-icon" style={{ color: c.color, background: `${c.color}18` }}>
+              {categorySymbol(c.id, c.name)}
+            </span>
             <b>{c.name}</b>
             <details className="row-actions">
               <summary aria-label={`Ações para a categoria ${c.name}`} title="Ações">···</summary>

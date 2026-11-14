@@ -1,6 +1,6 @@
 import type React from 'react'
 import { type Data, type Recurrence } from '../finance'
-import { money, monthName } from '../utils/format'
+import { categorySymbol, money, monthName } from '../utils/format'
 
 type RecurrencesViewProps = {
   data: Data
@@ -76,7 +76,7 @@ export function RecurrencesView({
                       }}
                     />
                     <span className="category-icon" style={{ color: category?.color, background: `${category?.color}18` }}>
-                      ↻
+                      {categorySymbol(item.category, category?.name)}
                     </span>
                     <span className="recurrence-info">
                       <b>{item.description}</b>
@@ -118,7 +118,7 @@ export function RecurrencesView({
               return (
                 <div className={`recurrence-template ${item.active ? '' : 'is-paused'}`} key={item.id}>
                   <span className="category-icon" style={{ color: category?.color, background: `${category?.color}18` }}>
-                    ↻
+                    {categorySymbol(item.category, category?.name)}
                   </span>
                   <span className="recurrence-info">
                     <b>{item.description}</b>

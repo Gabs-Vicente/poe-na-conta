@@ -1,5 +1,5 @@
 import type React from 'react'
-import { type Card, type Category, type Data, type InstallmentReliefSummary, type Occurrence, type Participant } from '../finance'
+import { QUICK_THIRD_PARTY_ID, QUICK_THIRD_PARTY_NAME, type Card, type Category, type Data, type InstallmentReliefSummary, type ManualReimbursement, type Occurrence, type Participant } from '../finance'
 import { categorySymbol, donutSlice, money, monthName, shortMonthYear, type MainView } from '../utils/format'
 
 type PieSlice = {
@@ -26,6 +26,7 @@ type ParticipantReimbursementItem = {
 
 type OverviewViewProps = {
   data: Data
+  theme: 'light' | 'dark'
   month: string
   previousMonth: string
   total: number
@@ -50,12 +51,15 @@ type OverviewViewProps = {
   installmentRelief: InstallmentReliefSummary
   cardSummaries: CardSummaryItem[]
   reimbursementByParticipant: ParticipantReimbursementItem[]
+  currentReimbursements: ManualReimbursement[]
   onTrendYearChange: (year: string) => void
   onCategoryPanelModeChange: (mode: 'categories' | 'transactions') => void
   onHoveredCategoryIdChange: (id: string | null) => void
   onOpenCardTransactions: (cardId: string) => void
   onOpenCardSettings: () => void
   onOpenNewExpenseModal: () => void
+  onOpenManualReimbursement: (item?: ManualReimbursement) => void
+  onDeleteManualReimbursement: (id: string) => void
   onNavigateView: (view: MainView) => void
   personalValue: (occurrence: Occurrence) => number
   owedBy: (occurrence: Occurrence) => string
@@ -63,6 +67,7 @@ type OverviewViewProps = {
 
 export function OverviewView({
   data,
+  theme,
   month,
   previousMonth,
   total,
@@ -87,12 +92,14 @@ export function OverviewView({
   installmentRelief,
   cardSummaries,
   reimbursementByParticipant,
+  currentReimbursements,
   onTrendYearChange,
   onCategoryPanelModeChange,
   onHoveredCategoryIdChange,
   onOpenCardTransactions,
   onOpenCardSettings,
-  onOpenNewExpenseModal,
+  onOpenManualReimbursement,
+  onDeleteManualReimbursement,
   personalValue,
   owedBy,
 }: OverviewViewProps) {
@@ -238,7 +245,7 @@ export function OverviewView({
                   return (
                     <div className="category-transaction" key={`${e.id}-${e.month}`}>
                       <span className="category-icon" style={{ color: cat?.color, background: `${cat?.color}18` }}>
-                        {categorySymbol(e.category)}
+                        {categorySymbol(e.category, cat?.name)}
                       </span>
                       <span className="category-transaction-info">
                         <b>{e.description}</b>
@@ -412,16 +419,18 @@ export function OverviewView({
           <div className="panel-head">
             <div>
               <h2>Quem precisa te pagar</h2>
-              <p>Reembolsos deste mês e parcelas futuras</p>
+              <p>Reembolsos deste mês, parcelas futuras e abatimentos manuais de racha</p>
             </div>
-            <span className="stat-symbol orange">＋</span>
+            <button type="button" className="outline-btn reimbursement-add-btn" onClick={() => onOpenManualReimbursement()}>
+              ＋ Abater valor avulso
+            </button>
           </div>
           {reimbursementByParticipant.length ? (
             <>
               {reimbursementByParticipant.map(({ participant, current: thisMonth, future }) => (
                 <div className="reimbursement-row" key={participant.id}>
                   <div className="reimbursement-person">
-                    <span className="participant-avatar">{participant.name.slice(0, 1).toUpperCase()}</span>
+                    <span className="participant-avatar">{participant.id === QUICK_THIRD_PARTY_ID ? '⚡' : participant.name.slice(0, 1).toUpperCase()}</span>
                     <b>{participant.name}</b>
                   </div>
                   <div className="reimbursement-values">
@@ -430,23 +439,69 @@ export function OverviewView({
                   </div>
                 </div>
               ))}
+              {currentReimbursements.length > 0 && (
+                <div className="manual-reimbursements-box">
+                  <span className="manual-reimbursements-title">Abatimentos manuais neste mês ({currentReimbursements.length})</span>
+                  <div className="manual-reimbursements-list">
+                    {currentReimbursements.map(item => {
+                      const personName =
+                        item.participantId === QUICK_THIRD_PARTY_ID
+                          ? QUICK_THIRD_PARTY_NAME
+                          : data.participants.find(p => p.id === item.participantId)?.name || 'Participante'
+                      const cardName = item.cardId ? data.cards.find(c => c.id === item.cardId)?.name : undefined
+                      const catName = item.categoryId ? data.categories.find(c => c.id === item.categoryId)?.name : undefined
+                      return (
+                        <div className="manual-reimbursement-item" key={item.id}>
+                          <div className="manual-reimbursement-info">
+                            <b>{item.description}</b>
+                            <small>
+                              {personName}
+                              {cardName ? ` · Fatura ${cardName}` : ''}
+                              {catName ? ` · ${catName}` : ''}
+                            </small>
+                          </div>
+                          <b className="manual-reimbursement-amount">− {money(item.amount)}</b>
+                          <details className="row-actions">
+                            <summary aria-label={`Ações para ${item.description}`} title="Ações">···</summary>
+                            <div className={`row-action-menu ${theme === 'dark' ? 'is-dark' : 'is-light'}`}>
+                              <button
+                                type="button"
+                                onClick={event => {
+                                  event.currentTarget.closest('details')?.removeAttribute('open')
+                                  onOpenManualReimbursement(item)
+                                }}
+                              >
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={event => {
+                                  event.currentTarget.closest('details')?.removeAttribute('open')
+                                  onDeleteManualReimbursement(item.id)
+                                }}
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </details>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="reimbursement-total">
-                <span>Total a receber neste mês</span>
+                <span>Total de terceiros / abatido neste mês</span>
                 <b>{money(reimbursementTotal)}</b>
               </div>
             </>
           ) : (
             <div className="empty compact">
-              {(data.participants || []).length ? (
-                'Adicione a parte de alguém em uma despesa para ver aqui quanto ela deve te pagar.'
-              ) : (
-                <>
-                  Cadastre uma pessoa direto em uma despesa compartilhada.{' '}
-                  <button className="text-btn" onClick={onOpenNewExpenseModal}>
-                    Nova despesa →
-                  </button>
-                </>
-              )}
+              Recebeu um PIX de racha (ex.: Uber/almoço) e não lembra quais corridas foram?{' '}
+              <button className="text-btn" onClick={() => onOpenManualReimbursement()}>
+                Abater valor avulso →
+              </button>
             </div>
           )}
         </div>

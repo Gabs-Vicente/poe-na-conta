@@ -254,7 +254,7 @@ export function TransactionsTable({
                   <td className="col-desc">
                     <div className="desc">
                       <span className="category-icon" style={{ color: cat?.color, background: `${cat?.color}18` }}>
-                        {categorySymbol(e.category)}
+                        {categorySymbol(e.category, cat?.name)}
                       </span>
                       <span className="desc-text">
                         <b>{e.description}</b>

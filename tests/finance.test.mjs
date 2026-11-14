@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildInstallmentRelief, buildOccurrences, cardDueMonth, createBackup, csvCell, expenseFirstMonth, formatMoneyInput, normalizeData, normalizeDateInput, occurrencePersonalValue, parseBackup, parseBackupFile, parseMoneyInput, readStoredData, seed, validateData } from '../src/finance.ts'
+import { buildInstallmentRelief, buildOccurrences, cardDueMonth, createBackup, csvCell, expenseFirstMonth, formatMoneyInput, normalizeData, normalizeDateInput, occurrencePersonalValue, parseBackup, parseBackupFile, parseMoneyInput, QUICK_THIRD_PARTY_ID, quickSplitThirdPartyAmount, readStoredData, seed, splitAmountAmongParticipantsOnly, splitAmountEquallyWithMe, validateData } from '../src/finance.ts'
 
 const card = { id: 'card', name: 'Principal', closingDay: 25, dueDay: 5, closingDayRule: 'after' }
 const cardClosing30 = { id: 'card30', name: 'Cartão dia 30', closingDay: 30, dueDay: 10, closingDayRule: 'after' }
@@ -154,4 +154,36 @@ test('calcula fim das parcelas e alívio mensal de fatura descontando parte de t
   assert.equal(reliefNov.milestones[0].lastMonth, '2026-12')
   assert.equal(reliefNov.milestones[0].reliefMonth, '2027-01')
   assert.equal(reliefNov.milestones[0].freedPersonalAmount, 800)
+})
+
+test('divide valores igualmente (comigo ou 100% terceiros) e calcula modo rápido de racha em centavos', () => {
+  assert.deepEqual(splitAmountEquallyWithMe(40, 3), [10, 10, 10])
+  assert.deepEqual(splitAmountEquallyWithMe(50, 2), [16.67, 16.67])
+  assert.deepEqual(splitAmountAmongParticipantsOnly(10, 3), [3.34, 3.33, 3.33])
+  assert.equal(quickSplitThirdPartyAmount(40, 1), 20)
+  assert.equal(quickSplitThirdPartyAmount(37.9, 2), 25.27)
+  assert.equal(quickSplitThirdPartyAmount(40, 3), 30)
+})
+
+test('preserva e valida abatimentos avulsos (reimbursements) no backup', () => {
+  const payloadWithReimbursement = {
+    ...seed,
+    recurrences: [],
+    reimbursements: [
+      {
+        id: 'reimb-1',
+        description: 'Racha dos Ubers da semana',
+        amount: 64.5,
+        month: '2026-11',
+        participantId: QUICK_THIRD_PARTY_ID,
+        cardId: 'card-1',
+        categoryId: 'cat-uber',
+      },
+    ],
+  }
+  const parsed = parseBackup(createBackup(payloadWithReimbursement))
+  assert.equal(parsed?.reimbursements?.length, 1)
+  assert.equal(parsed?.reimbursements?.[0].description, 'Racha dos Ubers da semana')
+  assert.equal(parsed?.reimbursements?.[0].amount, 64.5)
+  assert.equal(parsed?.reimbursements?.[0].participantId, QUICK_THIRD_PARTY_ID)
 })

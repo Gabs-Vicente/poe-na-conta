@@ -880,11 +880,11 @@ footer{color:#89877f}
 .app-shell[data-theme="dark"] .reimbursement-summary-btn:hover{background:#363d34;border-color:#586353;color:#fff}
 .participant-summary-modal{width:min(100%,490px)}
 .participant-summary-items{display:grid;gap:8px;margin-bottom:14px;padding:12px 14px;border:1px solid #e6e4dd;border-radius:14px;background:#faf9f5;max-height:240px;overflow-y:auto}
-.participant-summary-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:8px;border-bottom:1px solid #eeede7}
-.participant-summary-row div{min-width:0;flex:1}
+.participant-summary-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 6px 8px;border-bottom:1px solid #eeede7;border-radius:10px;transition:background-color .15s ease,border-color .15s ease}
+.participant-summary-row-info{min-width:0;flex:1 1 auto}
 .participant-summary-row b{display:block;font-size:11px;font-weight:700;color:#1e1f1c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .participant-summary-row small{display:block;margin-top:2px;font-size:9px;color:#7f7e75}
-.participant-summary-row strong{font-size:11px;font-weight:700;color:#262722;white-space:nowrap}
+.participant-summary-row strong{font-size:11px;font-weight:700;color:#262722;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
 .participant-summary-total{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:4px;font-size:10px;font-weight:600;color:#5c5d55}
 .participant-summary-total b{font:800 15px/1.15 Manrope,sans-serif;color:#1e5c3a}
 .participant-summary-preview-box{padding:12px 14px;border:1px dashed #cadccd;border-radius:14px;background:#f4faf6}
@@ -951,6 +951,56 @@ footer{color:#89877f}
 .app-shell[data-theme="dark"] .first-month-pill.is-selected small{color:#94cfa9}
 .recurrence-review-item-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
 .export-actions-group{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.cards-summary-head-actions{display:flex;align-items:center;gap:8px}
+.cards-collapse-btn{font-size:9px;padding:5px 10px;border-radius:9px;white-space:nowrap}
+.cards-summary-panel.is-collapsed .panel-head{margin-bottom:0}
+.reimbursement-paid-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:#e6f6ec;border:1px solid #bbe3c9;color:#1e633b;font-size:8.5px;font-weight:700}
+.reimbursement-settled-text{color:#1f7a46!important}
+.participant-summary-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.participant-summary-hint{font-size:9px;color:#6c6d64;line-height:1.35}
+.participant-mark-all-btn{font-size:9px;font-weight:700;padding:2px 4px}
+.participant-summary-row.is-paid{background:#eef7f1;border-bottom-color:#d8eadf}
+.participant-summary-row.is-paid .participant-summary-row-info b{color:#4d6b58;text-decoration:line-through}
+.participant-summary-row-right{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:0 0 auto}
+.is-paid-amount{color:#5d826b!important;text-decoration:line-through}
+.participant-paid-toggle{border:1px solid #d5d2c8;background:#fff;color:#353730;border-radius:999px;padding:5px 11px;font-size:9px;font-weight:700;cursor:pointer;transition:background-color .14s ease,border-color .14s ease,color .14s ease;white-space:nowrap}
+.participant-paid-toggle:hover{background:#eeede6;border-color:#bdbab0}
+.participant-paid-toggle.is-paid{background:#216b40;border-color:#216b40;color:#fff}
+.participant-paid-toggle.is-paid:hover{background:#1b5835;border-color:#1b5835}
+.participant-summary-paid-sub{display:flex;align-items:center;justify-content:space-between;padding-top:8px;margin-top:4px;border-top:1px dashed #e2dfd6;font-size:9px;color:#256a41}
+.participant-summary-paid-sub b{font-weight:700;color:#1e633b}
+.participant-summary-settled-box{display:flex;align-items:flex-start;gap:10px;padding:12px 13px;margin:10px 0 14px;border:1px solid #cbe6d4;border-radius:12px;background:#eff9f2}
+.participant-summary-settled-box>span{font-size:17px;line-height:1.1}
+.participant-summary-settled-box b{display:block;font-size:10px;font-weight:700;color:#1d5735;margin-bottom:2px}
+.participant-summary-settled-box p{margin:0;font-size:8.8px;line-height:1.45;color:#3c664d}
+.search-scope-toggle{display:inline-flex;align-items:center;padding:3px;border:1px solid #e1ded6;border-radius:10px;background:#f4f2ec;gap:2px}
+.search-scope-toggle button{border:0;background:transparent;color:#62635b;font-size:9px;font-weight:700;padding:5px 9px;border-radius:7px;cursor:pointer;white-space:nowrap;transition:background-color .14s ease,color .14s ease,box-shadow .14s ease}
+.search-scope-toggle button:hover{color:#232520}
+.search-scope-toggle button.is-active{background:#fff;color:#1c1e1a;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.tx-month-badge{display:inline-flex;align-items:center;margin-left:6px;padding:2px 6px;border-radius:6px;background:#eaf3ed;border:1px solid #cbe0d2;color:#255c3c;font-size:8px;font-weight:700;vertical-align:middle}
+.advance-modal{max-width:460px}
+.advance-count-selector{margin-bottom:12px;padding:10px 12px;border:1px solid #e6e3db;border-radius:13px;background:#faf9f5}
+.advance-count-pills{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px;max-height:165px;overflow-y:auto;padding:2px}
+.app-shell[data-theme="dark"] .reimbursement-paid-badge{background:#1f3528;border-color:#355d45;color:#98dfb4}
+.app-shell[data-theme="dark"] .reimbursement-settled-text{color:#7be1a8!important}
+.app-shell[data-theme="dark"] .participant-summary-hint{color:#9e9d92}
+.app-shell[data-theme="dark"] .participant-summary-row.is-paid{background:#1e2b23;border-bottom-color:#2f4738}
+.app-shell[data-theme="dark"] .participant-summary-row.is-paid .participant-summary-row-info b{color:#8eb59b}
+.app-shell[data-theme="dark"] .is-paid-amount{color:#7da68b!important}
+.app-shell[data-theme="dark"] .participant-paid-toggle{background:#252821;border-color:#3d4036;color:#e6e4db}
+.app-shell[data-theme="dark"] .participant-paid-toggle:hover{background:#30342b;border-color:#525649}
+.app-shell[data-theme="dark"] .participant-paid-toggle.is-paid{background:#2e8552;border-color:#2e8552;color:#fff}
+.app-shell[data-theme="dark"] .participant-summary-paid-sub{border-top-color:#34382f;color:#8ad4a6}
+.app-shell[data-theme="dark"] .participant-summary-paid-sub b{color:#9be3b7}
+.app-shell[data-theme="dark"] .participant-summary-settled-box{background:#1d2a22;border-color:#334d3c}
+.app-shell[data-theme="dark"] .participant-summary-settled-box b{color:#a4dfb9}
+.app-shell[data-theme="dark"] .participant-summary-settled-box p{color:#c4dcd0}
+.app-shell[data-theme="dark"] .search-scope-toggle{background:#1c1e19;border-color:#34362e}
+.app-shell[data-theme="dark"] .search-scope-toggle button{color:#9d9c91}
+.app-shell[data-theme="dark"] .search-scope-toggle button:hover{color:#eceae1}
+.app-shell[data-theme="dark"] .search-scope-toggle button.is-active{background:#2a2d25;color:#f3f1e8;box-shadow:0 1px 3px rgba(0,0,0,.28)}
+.app-shell[data-theme="dark"] .tx-month-badge{background:#213327;border-color:#385743;color:#9edbb6}
+.app-shell[data-theme="dark"] .advance-count-selector{background:#242620;border-color:#383a32}
 @media(max-width:520px){
   .card-kind-selector{grid-template-columns:1fr}
 }

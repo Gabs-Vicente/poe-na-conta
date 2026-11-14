@@ -6,10 +6,11 @@ export type Card = { id: string; name: string; closingDay: number; dueDay: numbe
 
 export const isManualBillingCard = (card?: Card): boolean => card?.kind === 'store' || card?.kind === 'borrowed'
 export type Participant = { id: string; name: string }
-export type ParticipantShare = { participantId: string; amount: number; installment?: number }
+export type ParticipantShare = { participantId: string; amount: number; installment?: number; paidInstallments?: number[] }
+export type AllocatedParticipantShare = ParticipantShare & { paid?: boolean }
 export type Expense = { id: string; description: string; amount: number; date: string; category: string; method: Method; cardId?: string; installments: number; firstMonth: string; afterClosing?: boolean; manualFirstMonth?: boolean; recurrenceId?: string; recurrenceMonth?: string; shares?: ParticipantShare[] }
 export type Recurrence = { id: string; description: string; amount: number; category: string; method: Method; cardId?: string; day: number; active: boolean; generatedMonths: string[]; skippedMonths: string[] }
-export type Occurrence = Expense & { part: number; month: string; value: number; allocatedShares: ParticipantShare[] }
+export type Occurrence = Expense & { part: number; month: string; value: number; allocatedShares: AllocatedParticipantShare[] }
 export type InstallmentReliefItem = {
   id: string
   description: string
@@ -156,7 +157,7 @@ export const buildOccurrences = (expenses: Expense[]): Occurrence[] => expenses.
       const index = share.installment - 1
       parts[index] = Math.min(shareCents, remaining[index])
       remaining[index] -= parts[index]
-      return { participantId: share.participantId, parts }
+      return { participantId: share.participantId, parts, paidInstallments: share.paidInstallments }
     }
     const shareBase = Math.floor(shareCents / count)
     const shareRemainder = shareCents % count
@@ -164,9 +165,21 @@ export const buildOccurrences = (expenses: Expense[]): Occurrence[] => expenses.
     parts.forEach((part, i) => { remaining[i] -= part })
     let unallocated = shareCents - parts.reduce((sum, part) => sum + part, 0)
     for (let i = 0; i < count && unallocated > 0; i++) { const extra = Math.min(unallocated, remaining[i]); parts[i] += extra; remaining[i] -= extra; unallocated -= extra }
-    return { participantId: share.participantId, parts }
+    return { participantId: share.participantId, parts, paidInstallments: share.paidInstallments }
   })
-  return values.map((value, i) => ({ ...expense, part: i + 1, month: shiftMonth(expense.firstMonth, i), value: value / 100, allocatedShares: allocations.map(share => ({ participantId: share.participantId, amount: share.parts[i] / 100 })).filter(share => share.amount > 0) }))
+  return values.map((value, i) => ({
+    ...expense,
+    part: i + 1,
+    month: shiftMonth(expense.firstMonth, i),
+    value: value / 100,
+    allocatedShares: allocations
+      .map(share => ({
+        participantId: share.participantId,
+        amount: share.parts[i] / 100,
+        ...(share.paidInstallments?.includes(i + 1) ? { paid: true } : {}),
+      }))
+      .filter(share => share.amount > 0),
+  }))
 })
 
 export const QUICK_THIRD_PARTY_ID = '__terceiros__'
@@ -305,7 +318,7 @@ export const validateData = (value: unknown): value is Data => {
     if (item.manualFirstMonth !== undefined && typeof item.manualFirstMonth !== 'boolean') return false
     if (item.recurrenceId !== undefined && !isText(item.recurrenceId)) return false
     if (item.recurrenceMonth !== undefined && !isText(item.recurrenceMonth)) return false
-    if (item.shares !== undefined && (!Array.isArray(item.shares) || !item.shares.every(share => isRecord(share) && isText(share.participantId) && isFiniteNumber(share.amount) && share.amount >= 0 && (share.installment === undefined || (Number.isInteger(share.installment) && Number(share.installment) >= 1 && Number(share.installment) <= 60))))) return false
+    if (item.shares !== undefined && (!Array.isArray(item.shares) || !item.shares.every(share => isRecord(share) && isText(share.participantId) && isFiniteNumber(share.amount) && share.amount >= 0 && (share.installment === undefined || (Number.isInteger(share.installment) && Number(share.installment) >= 1 && Number(share.installment) <= 60)) && (share.paidInstallments === undefined || (Array.isArray(share.paidInstallments) && share.paidInstallments.every(p => Number.isInteger(p) && Number(p) >= 1 && Number(p) <= 60)))))) return false
     return true
   })
 }

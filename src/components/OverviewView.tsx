@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type React from 'react'
 import { QUICK_THIRD_PARTY_ID, QUICK_THIRD_PARTY_NAME, type Card, type Category, type Data, type InstallmentReliefSummary, type ManualReimbursement, type Occurrence, type Participant } from '../finance'
 import { categorySymbol, donutSlice, money, monthName, shortMonthYear, type MainView } from '../utils/format'
@@ -21,6 +22,7 @@ type CardSummaryItem = {
 type ParticipantReimbursementItem = {
   participant: Participant
   current: number
+  paidCurrent: number
   future: number
 }
 
@@ -106,6 +108,27 @@ export function OverviewView({
   owedBy,
 }: OverviewViewProps) {
   const nextRelief = installmentRelief.milestones[0]
+  const [cardsCollapsed, setCardsCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('poe-na-conta-cards-collapsed') === '1'
+    } catch {
+      return false
+    }
+  })
+
+  const toggleCardsCollapsed = () => {
+    setCardsCollapsed(prev => {
+      const next = !prev
+      try {
+        localStorage.setItem('poe-na-conta-cards-collapsed', next ? '1' : '0')
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
+  }
+
+  const totalCardsInvoice = cardSummaries.reduce((sum, item) => sum + item.invoiceTotal, 0)
 
   return (
     <>
@@ -418,57 +441,6 @@ export function OverviewView({
             <span>ⓘ</span> Sua parte após descontar os valores atribuídos a terceiros.
           </div>
         </div>
-        <div className="panel cards-summary-panel">
-          <div className="panel-head">
-            <div>
-              <h2>Resumo por cartão</h2>
-              <p>Faturas previstas em {monthName(month)} e fechamento</p>
-            </div>
-            <span className="calendar-icon">▣</span>
-          </div>
-          {cardSummaries.length ? (
-            <div className="cards-summary-grid">
-              {cardSummaries.map(({ card, invoiceTotal, personalPart, sharedPart, count, nextInvoiceTotal }) => (
-                <div className="card-summary-item" key={card.id}>
-                  <div className="card-summary-top">
-                    <div className="card-summary-title">
-                      <span className="card-icon">{card.kind === 'store' ? '🛍️' : card.kind === 'borrowed' ? '🤝' : '🏦'}</span>
-                      <div>
-                        <b>{card.name}</b>
-                        <small>
-                          {card.kind === 'store'
-                            ? 'Crédito de loja · Mês definido na compra'
-                            : card.kind === 'borrowed'
-                              ? 'Cartão emprestado · Mês definido na compra'
-                              : `Fecha dia ${card.closingDay} · Vence dia ${card.dueDay}`}
-                        </small>
-                      </div>
-                    </div>
-                    <button type="button" className="text-btn card-summary-link" onClick={() => onOpenCardTransactions(card.id)}>
-                      Ver fatura →
-                    </button>
-                  </div>
-                  <div className="card-summary-amount">
-                    <span>Total da fatura ({count} {count === 1 ? 'item' : 'itens'})</span>
-                    <strong>{money(invoiceTotal)}</strong>
-                  </div>
-                  <div className="card-summary-breakdown">
-                    <span>Sua parte: <b>{money(personalPart)}</b></span>
-                    {sharedPart > 0 && <span>Terceiros: <b>{money(sharedPart)}</b></span>}
-                    <span>Próx. mês: <b>{money(nextInvoiceTotal)}</b></span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="empty compact">
-              Nenhum cartão cadastrado.{' '}
-              <button className="text-btn" onClick={onOpenCardSettings}>
-                Adicionar cartão →
-              </button>
-            </div>
-          )}
-        </div>
         <div className="panel reimbursement-panel">
           <div className="panel-head">
             <div>
@@ -481,16 +453,26 @@ export function OverviewView({
           </div>
           {reimbursementByParticipant.length ? (
             <>
-              {reimbursementByParticipant.map(({ participant, current: thisMonth, future }) => (
+              {reimbursementByParticipant.map(({ participant, current: thisMonth, paidCurrent, future }) => (
                 <div className="reimbursement-row" key={participant.id}>
                   <div className="reimbursement-person">
                     <span className="participant-avatar">{participant.id === QUICK_THIRD_PARTY_ID ? '⚡' : participant.name.slice(0, 1).toUpperCase()}</span>
                     <b>{participant.name}</b>
                   </div>
                   <div className="reimbursement-values">
-                    <span>Neste mês <b>{money(thisMonth)}</b></span>
+                    <span>
+                      Neste mês{' '}
+                      <b className={thisMonth === 0 && paidCurrent > 0 ? 'reimbursement-settled-text' : ''}>
+                        {thisMonth === 0 && paidCurrent > 0 ? 'Quitado ✓' : money(thisMonth)}
+                      </b>
+                    </span>
+                    {paidCurrent > 0 && (
+                      <span className="reimbursement-paid-badge" title="Valor já marcado como pago neste mês">
+                        ✓ {money(paidCurrent)} pago
+                      </span>
+                    )}
                     <span>Parcelas futuras <b>{money(future)}</b></span>
-                    {thisMonth > 0 && (
+                    {(thisMonth > 0 || paidCurrent > 0) && (
                       <button
                         type="button"
                         className="reimbursement-summary-btn"
@@ -566,6 +548,72 @@ export function OverviewView({
                 Abater valor avulso →
               </button>
             </div>
+          )}
+        </div>
+        <div className={`panel cards-summary-panel ${cardsCollapsed ? 'is-collapsed' : ''}`}>
+          <div className="panel-head">
+            <div>
+              <h2>Resumo por cartão</h2>
+              <p>
+                {cardsCollapsed
+                  ? `${cardSummaries.length} ${cardSummaries.length === 1 ? 'cartão' : 'cartões'} · Total nas faturas de ${monthName(month)}: ${money(totalCardsInvoice)}`
+                  : `Faturas previstas em ${monthName(month)} e fechamento`}
+              </p>
+            </div>
+            <div className="cards-summary-head-actions">
+              <button
+                type="button"
+                className="outline-btn cards-collapse-btn"
+                aria-expanded={!cardsCollapsed}
+                onClick={toggleCardsCollapsed}
+              >
+                {cardsCollapsed ? '▾ Expandir' : '▴ Recolher'}
+              </button>
+            </div>
+          </div>
+          {!cardsCollapsed && (
+            cardSummaries.length ? (
+              <div className="cards-summary-grid">
+                {cardSummaries.map(({ card, invoiceTotal, personalPart, sharedPart, count, nextInvoiceTotal }) => (
+                  <div className="card-summary-item" key={card.id}>
+                    <div className="card-summary-top">
+                      <div className="card-summary-title">
+                        <span className="card-icon">{card.kind === 'store' ? '🛍️' : card.kind === 'borrowed' ? '🤝' : '🏦'}</span>
+                        <div>
+                          <b>{card.name}</b>
+                          <small>
+                            {card.kind === 'store'
+                              ? 'Crédito de loja · Mês definido na compra'
+                              : card.kind === 'borrowed'
+                                ? 'Cartão emprestado · Mês definido na compra'
+                                : `Fecha dia ${card.closingDay} · Vence dia ${card.dueDay}`}
+                          </small>
+                        </div>
+                      </div>
+                      <button type="button" className="text-btn card-summary-link" onClick={() => onOpenCardTransactions(card.id)}>
+                        Ver fatura →
+                      </button>
+                    </div>
+                    <div className="card-summary-amount">
+                      <span>Total da fatura ({count} {count === 1 ? 'item' : 'itens'})</span>
+                      <strong>{money(invoiceTotal)}</strong>
+                    </div>
+                    <div className="card-summary-breakdown">
+                      <span>Sua parte: <b>{money(personalPart)}</b></span>
+                      {sharedPart > 0 && <span>Terceiros: <b>{money(sharedPart)}</b></span>}
+                      <span>Próx. mês: <b>{money(nextInvoiceTotal)}</b></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty compact">
+                Nenhum cartão cadastrado.{' '}
+                <button className="text-btn" onClick={onOpenCardSettings}>
+                  Adicionar cartão →
+                </button>
+              </div>
+            )
           )}
         </div>
       </section>

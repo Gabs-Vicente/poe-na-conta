@@ -239,3 +239,34 @@ test('preserva o mês escolhido manualmente em créditos de loja e cartões empr
   assert.equal(borrowedExpense?.manualFirstMonth, true)
 })
 
+test('preserva parcelas pagas por participantes sem alterar a parte pessoal', () => {
+  const expenses = [
+    {
+      id: 'exp-racha',
+      description: 'Jantar em grupo',
+      amount: 300,
+      date: '2026-11-10',
+      category: 'alimentacao',
+      method: 'Crédito parcelado',
+      installments: 2,
+      firstMonth: '2026-11',
+      shares: [
+        {
+          participantId: 'p1',
+          amount: 100,
+          paidInstallments: [1],
+        },
+      ],
+    },
+  ]
+  const occurrences = buildOccurrences(expenses)
+  assert.equal(occurrences.length, 2)
+  assert.equal(occurrences[0].allocatedShares[0].paid, true)
+  assert.equal(occurrences[1].allocatedShares[0].paid, undefined)
+  assert.equal(occurrencePersonalValue(occurrences[0]), 100)
+  assert.equal(occurrencePersonalValue(occurrences[1]), 100)
+
+  const parsed = parseBackup(createBackup({ ...seed, expenses, recurrences: [] }))
+  assert.deepEqual(parsed?.expenses[0].shares?.[0].paidInstallments, [1])
+})
+

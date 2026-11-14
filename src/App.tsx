@@ -37,7 +37,9 @@ import {
   type Expense,
   type ManualReimbursement,
   type Method,
+  type Occurrence,
   type Participant,
+  type ParticipantShare,
   type Recurrence,
 } from './finance'
 import {
@@ -51,6 +53,7 @@ import {
   money,
   monthName,
   profileInitials,
+  shortMonthYear,
   type MainView,
   type SortOrder,
 } from './utils/format'
@@ -97,7 +100,12 @@ type ManualReimbursementEditor = {
   cardId: string
   categoryId: string
 }
-type ModalKind = 'expense' | 'recurrence' | 'reimbursement' | 'participant-summary' | 'settings' | 'backup' | 'easter-egg' | 'onboarding' | 'reset' | 'confirm' | 'pwa-guide'
+type AdvanceInstallmentsEditor = {
+  occurrence: Occurrence
+  countToAdvance: number
+  customAmount: string
+}
+type ModalKind = 'expense' | 'recurrence' | 'reimbursement' | 'participant-summary' | 'advance' | 'settings' | 'backup' | 'easter-egg' | 'onboarding' | 'reset' | 'confirm' | 'pwa-guide'
 type OnboardingStartMode = 'empty' | 'demo' | 'keep'
 type ConfirmDialog = { eyebrow: string; title: string; description: string; confirmLabel: string; onConfirm: () => void }
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
@@ -201,6 +209,7 @@ function App() {
     return Number.isInteger(saved) && saved >= 1 && saved <= 100 ? String(saved) : '80'
   })
   const [query, setQuery] = useState('')
+  const [searchAllMonths, setSearchAllMonths] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('Todas as categorias')
   const [methodFilter, setMethodFilter] = useState('Todos os pagamentos')
   const [cardFilter, setCardFilter] = useState('Todos os cartões')
@@ -232,6 +241,8 @@ function App() {
   const [recurrenceEditor, setRecurrenceEditor] = useState<RecurrenceEditor | null>(null)
   const [reimbursementEditor, setReimbursementEditor] = useState<ManualReimbursementEditor | null>(null)
   const [participantSummaryTarget, setParticipantSummaryTarget] = useState<Participant | null>(null)
+  const [advanceEditor, setAdvanceEditor] = useState<AdvanceInstallmentsEditor | null>(null)
+  const [advanceError, setAdvanceError] = useState('')
   const [recurrenceSelection, setRecurrenceSelection] = useState<string[] | null>(null)
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([])
   const [form, setForm] = useState<ExpenseForm>(() => ({
@@ -289,6 +300,7 @@ function App() {
     recurrenceEditor ||
     reimbursementEditor ||
     participantSummaryTarget ||
+    advanceEditor ||
     confirmDialog ||
     onboardingOpen ||
     resetDataModalOpen ||
@@ -683,12 +695,18 @@ function App() {
       .filter((name): name is string => Boolean(name))
     const amount = shares.reduce((sum, share) => sum + share.amount, 0)
     if (!amount) return ''
-    if (names.length === 1 && names[0] === QUICK_THIRD_PARTY_NAME) return `Terceiros (avulso): ${money(amount)}`
-    return `${names.length ? names.join(', ') : 'Participante'} ${names.length === 1 ? 'deve' : 'devem'} ${money(amount)}`
+    const unpaidAmount = shares.filter(share => !share.paid).reduce((sum, share) => sum + share.amount, 0)
+    if (unpaidAmount === 0) {
+      if (names.length === 1 && names[0] === QUICK_THIRD_PARTY_NAME) return `Terceiros (avulso): ${money(amount)} (pago ✓)`
+      return `${names.length ? names.join(', ') : 'Participante'} pagou ${money(amount)} ✓`
+    }
+    if (names.length === 1 && names[0] === QUICK_THIRD_PARTY_NAME) return `Terceiros (avulso): ${money(unpaidAmount)}`
+    return `${names.length ? names.join(', ') : 'Participante'} ${names.length === 1 ? 'deve' : 'devem'} ${money(unpaidAmount)}`
   }
 
   const filtered = useMemo(() => {
-    const matching = current.filter(e => {
+    const sourceList = view === 'Lançamentos' && searchAllMonths ? occurrences : current
+    const matching = sourceList.filter(e => {
       if (!e.description.toLowerCase().includes(query.toLowerCase())) return false
       if (categoryFilter !== 'Todas as categorias' && e.category !== categoryFilter) return false
       if (methodFilter === 'Crédito (todos)') {
@@ -703,15 +721,16 @@ function App() {
       return true
     })
     return [...matching].sort((a, b) => {
-      if (sortOrder === 'date-desc') return b.date.localeCompare(a.date)
-      if (sortOrder === 'date-asc') return a.date.localeCompare(b.date)
+      if (sortOrder === 'date-desc') return b.date.localeCompare(a.date) || b.month.localeCompare(a.month)
+      if (sortOrder === 'date-asc') return a.date.localeCompare(b.date) || a.month.localeCompare(b.month)
       if (sortOrder === 'value-desc') return occurrencePersonalValue(b) - occurrencePersonalValue(a) || b.date.localeCompare(a.date)
       if (sortOrder === 'value-asc') return occurrencePersonalValue(a) - occurrencePersonalValue(b) || b.date.localeCompare(a.date)
       return a.description.localeCompare(b.description, 'pt-BR')
     })
-  }, [current, query, categoryFilter, methodFilter, cardFilter, sortOrder, data.cards])
+  }, [view, searchAllMonths, occurrences, current, query, categoryFilter, methodFilter, cardFilter, sortOrder, data.cards])
 
   const hasActiveFilters =
+    (view === 'Lançamentos' && searchAllMonths) ||
     Boolean(query.trim()) ||
     categoryFilter !== 'Todas as categorias' ||
     methodFilter !== 'Todos os pagamentos' ||
@@ -719,6 +738,7 @@ function App() {
 
   const clearAllFilters = () => {
     setQuery('')
+    setSearchAllMonths(false)
     setCategoryFilter('Todas as categorias')
     setMethodFilter('Todos os pagamentos')
     setCardFilter('Todos os cartões')
@@ -726,7 +746,7 @@ function App() {
   }
 
   const filteredPersonalTotal = filtered.reduce((sum, e) => sum + personalValue(e), 0)
-  const filteredReimbursementTotal = filtered.reduce((sum, e) => sum + e.allocatedShares.reduce((s, sh) => s + sh.amount, 0), 0)
+  const filteredReimbursementTotal = filtered.reduce((sum, e) => sum + e.allocatedShares.filter(sh => !sh.paid).reduce((s, sh) => s + sh.amount, 0), 0)
   const filteredInvoiceTotal = filtered.reduce((sum, e) => sum + e.value, 0)
   const filteredExpenseIds = Array.from(new Set(filtered.map(e => e.id)))
   const selectedVisibleIds = filteredExpenseIds.filter(id => selectedExpenseIds.includes(id))
@@ -742,7 +762,7 @@ function App() {
   const monthlyLimitNotice = monthlyLimitValue > 0 && total >= (monthlyLimitValue * limitNoticePercentValue) / 100
   const reimbursementTotal =
     Math.round(
-      (currentExpenses.reduce((sum, e) => sum + e.allocatedShares.reduce((shareSum, share) => shareSum + share.amount, 0), 0) + manualReimbursementTotal) * 100,
+      (currentExpenses.reduce((sum, e) => sum + e.allocatedShares.filter(sh => !sh.paid).reduce((shareSum, share) => shareSum + share.amount, 0), 0) + manualReimbursementTotal) * 100,
     ) / 100
   const categoryTotals = data.categories
     .map(c => {
@@ -757,20 +777,30 @@ function App() {
       participant,
       current:
         Math.round(
-          (currentExpenses.reduce((sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id).reduce((a, s) => a + s.amount, 0), 0) +
+          (currentExpenses.reduce(
+            (sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id && !s.paid).reduce((a, s) => a + s.amount, 0),
+            0,
+          ) +
             currentReimbursements.filter(r => r.participantId === participant.id).reduce((s, r) => s + r.amount, 0)) *
             100,
+        ) / 100,
+      paidCurrent:
+        Math.round(
+          currentExpenses.reduce(
+            (sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id && s.paid).reduce((a, s) => a + s.amount, 0),
+            0,
+          ) * 100,
         ) / 100,
       future:
         Math.round(
           (occurrences
             .filter(e => e.month > month)
-            .reduce((sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id).reduce((a, s) => a + s.amount, 0), 0) +
+            .reduce((sum, e) => sum + e.allocatedShares.filter(s => s.participantId === participant.id && !s.paid).reduce((a, s) => a + s.amount, 0), 0) +
             allReimbursements.filter(r => r.month > month && r.participantId === participant.id).reduce((s, r) => s + r.amount, 0)) *
             100,
         ) / 100,
     }))
-    .filter(x => x.current > 0 || x.future > 0)
+    .filter(x => x.current > 0 || x.paidCurrent > 0 || x.future > 0)
   const nextMonths = Array.from({ length: 5 }, (_, i) => shiftMonthKey(month, i))
   const nextMonthKey = shiftMonthKey(month, 1)
   const cardSummaries = data.cards.map(card => {
@@ -1181,14 +1211,20 @@ function App() {
       triggerFormShake('expense')
       return
     }
-    const shares = form.shares
-      .map(share => ({
-        participantId: share.participantId,
-        amount: parseMoneyInput(share.amount) || 0,
-        installment: form.method === 'Crédito parcelado' && share.installment !== 'all' ? Number(share.installment) : undefined,
-      }))
-      .filter(share => share.amount > 0)
     const count = form.method === 'Crédito parcelado' ? Math.max(1, n) : 1
+    const previousExpense = editingExpenseId ? data.expenses.find(e => e.id === editingExpenseId) : undefined
+    const shares: ParticipantShare[] = form.shares
+      .map(share => {
+        const prevShare = previousExpense?.shares?.find(ps => ps.participantId === share.participantId)
+        const keptPaid = prevShare?.paidInstallments?.filter(inst => inst >= 1 && inst <= count)
+        return {
+          participantId: share.participantId,
+          amount: parseMoneyInput(share.amount) || 0,
+          installment: form.method === 'Crédito parcelado' && share.installment !== 'all' ? Number(share.installment) : undefined,
+          ...(keptPaid && keptPaid.length > 0 ? { paidInstallments: keptPaid } : {}),
+        }
+      })
+      .filter(share => share.amount > 0)
     const totalCents = Math.round(amount * 100)
     const partValues = Array.from({ length: count }, (_, i) => Math.floor(totalCents / count) + (i < totalCents % count ? 1 : 0))
     const allocated = Array.from({ length: count }, () => 0)
@@ -1226,7 +1262,6 @@ function App() {
         : undefined
     const onClosingDay = Boolean(card && !isManualCard && Number(normalizedDate.slice(-2)) === card.closingDay)
     const firstMonth = manualMonth || expenseFirstMonth(normalizedDate, form.method, card, onClosingDay ? form.afterClosing : undefined)
-    const previousExpense = editingExpenseId ? data.expenses.find(e => e.id === editingExpenseId) : undefined
     const linkedRecurrence = previousExpense
       ? recurrences.find(rec => matchesRecurrenceInMonth(previousExpense, rec, previousExpense.recurrenceMonth || previousExpense.date.slice(0, 7)))
       : undefined
@@ -1819,6 +1854,204 @@ function App() {
     }
   }
 
+  const toggleParticipantSharePaid = (expenseId: string, part: number, participantId: string) => {
+    const updatedExpenses = data.expenses.map(exp => {
+      if (exp.id !== expenseId || !exp.shares) return exp
+      return {
+        ...exp,
+        shares: exp.shares.map(sh => {
+          if (sh.participantId !== participantId) return sh
+          const currentPaid = sh.paidInstallments || []
+          const isAlreadyPaid = currentPaid.includes(part)
+          const nextPaid = isAlreadyPaid ? currentPaid.filter(p => p !== part) : [...currentPaid, part].sort((a, b) => a - b)
+          const rest = { ...sh }
+          delete rest.paidInstallments
+          return nextPaid.length > 0 ? { ...rest, paidInstallments: nextPaid } : rest
+        }),
+      }
+    })
+    save({ ...data, expenses: updatedExpenses })
+  }
+
+  const setAllParticipantSharesPaidInMonth = (participantId: string, markPaid: boolean) => {
+    const targetsInMonth = new Map<string, number[]>()
+    for (const occ of currentExpenses) {
+      const hasShare = occ.allocatedShares.some(s => s.participantId === participantId && s.amount > 0)
+      if (!hasShare) continue
+      const list = targetsInMonth.get(occ.id) || []
+      list.push(occ.part)
+      targetsInMonth.set(occ.id, list)
+    }
+    if (targetsInMonth.size === 0) return
+    const updatedExpenses = data.expenses.map(exp => {
+      const partsInMonth = targetsInMonth.get(exp.id)
+      if (!partsInMonth || !exp.shares) return exp
+      return {
+        ...exp,
+        shares: exp.shares.map(sh => {
+          if (sh.participantId !== participantId) return sh
+          const currentPaid = new Set(sh.paidInstallments || [])
+          for (const part of partsInMonth) {
+            if (markPaid) currentPaid.add(part)
+            else currentPaid.delete(part)
+          }
+          const nextPaid = Array.from(currentPaid).sort((a, b) => a - b)
+          const rest = { ...sh }
+          delete rest.paidInstallments
+          return nextPaid.length > 0 ? { ...rest, paidInstallments: nextPaid } : rest
+        }),
+      }
+    })
+    if (save({ ...data, expenses: updatedExpenses })) {
+      showToast(markPaid ? 'Todas as despesas deste mês marcadas como pagas!' : 'Despesas marcadas como pendentes novamente.')
+    }
+  }
+
+  const computeAdvanceDefaultAmount = (occ: Occurrence, countToAdvance: number): number => {
+    const totalInstallments = Math.max(1, occ.installments || 1)
+    const keptCount = Math.max(1, totalInstallments - countToAdvance)
+    const totalCents = Math.round(occ.amount * 100)
+    let keptCents = 0
+    for (let i = 0; i < keptCount; i++) {
+      keptCents += Math.floor(totalCents / totalInstallments) + (i < totalCents % totalInstallments ? 1 : 0)
+    }
+    return Math.max(0, totalCents - keptCents) / 100
+  }
+
+  const openAdvanceInstallments = (occ: Occurrence) => {
+    if (occ.installments <= 1 || occ.part >= occ.installments) return
+    const remaining = occ.installments - occ.part
+    const defaultAmt = computeAdvanceDefaultAmount(occ, remaining)
+    setAdvanceError('')
+    setAdvanceEditor({
+      occurrence: occ,
+      countToAdvance: remaining,
+      customAmount: formatMoneyInput(defaultAmt),
+    })
+  }
+
+  const closeAdvanceModal = () =>
+    closeModalWithAnimation('advance', () => {
+      setAdvanceEditor(null)
+      setAdvanceError('')
+    })
+
+  const confirmAdvanceInstallments = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!advanceEditor) return
+    const { occurrence: occ, countToAdvance, customAmount } = advanceEditor
+    const remaining = occ.installments - occ.part
+    if (countToAdvance < 1 || countToAdvance > remaining) {
+      setAdvanceError(`Escolha entre 1 e ${remaining} parcelas para adiantar.`)
+      triggerFormShake('advance')
+      return
+    }
+    const parsedCustom = parseMoneyInput(customAmount)
+    if (!customAmount.trim() || !Number.isFinite(parsedCustom) || parsedCustom <= 0) {
+      setAdvanceError('Informe um valor válido maior que zero para o adiantamento.')
+      triggerFormShake('advance')
+      return
+    }
+    const targetExpense = data.expenses.find(e => e.id === occ.id)
+    if (!targetExpense) {
+      closeAdvanceModal()
+      return
+    }
+    const totalInstallments = Math.max(1, targetExpense.installments || 1)
+    const keptCount = totalInstallments - countToAdvance
+    const totalCents = Math.round(targetExpense.amount * 100)
+    let keptCents = 0
+    for (let i = 0; i < keptCount; i++) {
+      keptCents += Math.floor(totalCents / totalInstallments) + (i < totalCents % totalInstallments ? 1 : 0)
+    }
+    const keptAmount = keptCents / 100
+
+    const keptShares: ParticipantShare[] = []
+    const advancedSharesMap = new Map<string, number>()
+
+    for (const sh of targetExpense.shares || []) {
+      const shCents = Math.round(sh.amount * 100)
+      if (sh.installment) {
+        if (sh.installment <= keptCount) {
+          const keptPaid = sh.paidInstallments?.filter(p => p <= keptCount)
+          keptShares.push({
+            participantId: sh.participantId,
+            amount: sh.amount,
+            installment: sh.installment,
+            ...(keptPaid && keptPaid.length ? { paidInstallments: keptPaid } : {}),
+          })
+        } else {
+          advancedSharesMap.set(sh.participantId, (advancedSharesMap.get(sh.participantId) || 0) + shCents)
+        }
+      } else {
+        let shKeptCents = 0
+        for (let i = 0; i < keptCount; i++) {
+          shKeptCents += Math.floor(shCents / totalInstallments) + (i < shCents % totalInstallments ? 1 : 0)
+        }
+        const shAdvCents = Math.max(0, shCents - shKeptCents)
+        if (shKeptCents > 0) {
+          const keptPaid = sh.paidInstallments?.filter(p => p <= keptCount)
+          keptShares.push({
+            participantId: sh.participantId,
+            amount: shKeptCents / 100,
+            ...(keptPaid && keptPaid.length ? { paidInstallments: keptPaid } : {}),
+          })
+        }
+        if (shAdvCents > 0) {
+          advancedSharesMap.set(sh.participantId, (advancedSharesMap.get(sh.participantId) || 0) + shAdvCents)
+        }
+      }
+    }
+
+    const finalAdvCents = Math.round(parsedCustom * 100)
+    const rawAdvSharesTotalCents = Array.from(advancedSharesMap.values()).reduce((a, b) => a + b, 0)
+    const advancedShares: ParticipantShare[] = Array.from(advancedSharesMap.entries())
+      .map(([participantId, cents]) => {
+        const scaledCents = rawAdvSharesTotalCents > finalAdvCents ? Math.floor((cents * finalAdvCents) / rawAdvSharesTotalCents) : cents
+        return {
+          participantId,
+          amount: scaledCents / 100,
+        }
+      })
+      .filter(s => s.amount > 0)
+
+    const updatedOriginal: Expense = {
+      ...targetExpense,
+      amount: keptAmount,
+      installments: keptCount,
+      method: keptCount > 1 ? 'Crédito parcelado' : targetExpense.method === 'Crédito parcelado' ? 'Crédito à vista' : targetExpense.method,
+      shares: keptShares,
+    }
+
+    const advancedExpense: Expense = {
+      id: createId(),
+      description: `${targetExpense.description} (Adiantamento de ${countToAdvance} ${countToAdvance === 1 ? 'parcela' : 'parcelas'})`,
+      amount: Math.round(parsedCustom * 100) / 100,
+      date: targetExpense.date,
+      category: targetExpense.category,
+      method: targetExpense.method.startsWith('Crédito') ? 'Crédito à vista' : targetExpense.method,
+      cardId: targetExpense.cardId,
+      installments: 1,
+      firstMonth: occ.month,
+      manualFirstMonth: true,
+      shares: advancedShares,
+    }
+
+    if (
+      save({
+        ...data,
+        expenses: [advancedExpense, ...data.expenses.map(e => (e.id === updatedOriginal.id ? updatedOriginal : e))],
+      })
+    ) {
+      showToast(
+        countToAdvance === 1
+          ? `1 parcela adiantada para ${monthName(occ.month)}!`
+          : `${countToAdvance} parcelas adiantadas para ${monthName(occ.month)}!`,
+      )
+      closeAdvanceModal()
+    }
+  }
+
   const transactionTable = (
     <TransactionsTable
       view={view}
@@ -1832,6 +2065,7 @@ function App() {
       filteredReimbursementTotal={filteredReimbursementTotal}
       filteredInvoiceTotal={filteredInvoiceTotal}
       hasActiveFilters={hasActiveFilters}
+      searchAllMonths={searchAllMonths}
       query={query}
       categoryFilter={categoryFilter}
       methodFilter={methodFilter}
@@ -1841,6 +2075,7 @@ function App() {
       selectedVisibleIds={selectedVisibleIds}
       allVisibleSelected={allVisibleSelected}
       filteredExpenseIds={filteredExpenseIds}
+      onSearchAllMonthsChange={setSearchAllMonths}
       onQueryChange={setQuery}
       onCategoryFilterChange={setCategoryFilter}
       onMethodFilterChange={setMethodFilter}
@@ -1854,6 +2089,7 @@ function App() {
       onDownloadImage={downloadReportImage}
       onEditExpense={editExpense}
       onDuplicateExpense={duplicateExpense}
+      onOpenAdvanceInstallments={openAdvanceInstallments}
       onDeleteExpense={deleteExpense}
       personalValue={personalValue}
       owedBy={owedBy}
@@ -3014,7 +3250,6 @@ function App() {
                   <span className="card-kind-icon" aria-hidden="true">🏦</span>
                   <div>
                     <b>Cartão tradicional</b>
-                    <small>Com dia fixo de fechamento e vencimento</small>
                   </div>
                 </button>
                 <button
@@ -3031,7 +3266,6 @@ function App() {
                   <span className="card-kind-icon" aria-hidden="true">🛍️</span>
                   <div>
                     <b>Crédito de loja</b>
-                    <small>Shopee Pay, Mercado Crédito, AliExpress Parcela</small>
                   </div>
                 </button>
                 <button
@@ -3048,7 +3282,6 @@ function App() {
                   <span className="card-kind-icon" aria-hidden="true">🤝</span>
                   <div>
                     <b>Cartão emprestado</b>
-                    <small>De mãe, familiar ou amigo (sem fechamento fixo)</small>
                   </div>
                 </button>
               </div>
@@ -3851,9 +4084,12 @@ function App() {
           return [
             {
               key: `${e.id}-${e.part}`,
+              expenseId: e.id,
+              part: e.part,
               description: e.description,
               detail: `${shortDate} · ${e.installments > 1 ? `Parcela ${e.part}/${e.installments}` : e.method}`,
               amount: share.amount,
+              paid: Boolean(share.paid),
               labelForText: e.installments > 1 ? `${e.description} (Parcela ${e.part}/${e.installments})` : e.description,
             },
           ]
@@ -3862,23 +4098,33 @@ function App() {
           .filter(r => r.participantId === participantSummaryTarget.id && r.amount > 0)
           .map(r => ({
             key: r.id,
+            expenseId: undefined as string | undefined,
+            part: 1,
             description: r.description,
             detail: 'Abatimento avulso no mês',
             amount: r.amount,
+            paid: false,
             labelForText: r.description,
           }))
         const allSummaryItems = [...expenseItems, ...manualItems]
-        const summaryTotal = Math.round(allSummaryItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100
-        const itemClauses = allSummaryItems.map(item => `${money(item.amount)} por conta de ${item.labelForText}`).join(', ')
+        const unpaidSummaryItems = allSummaryItems.filter(item => !item.paid)
+        const paidSummaryTotal = Math.round(allSummaryItems.filter(item => item.paid).reduce((sum, item) => sum + item.amount, 0) * 100) / 100
+        const summaryTotal = Math.round(unpaidSummaryItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100
+        const allExpenseItemsPaid = expenseItems.length > 0 && expenseItems.every(item => item.paid)
+        const itemClauses = unpaidSummaryItems.map(item => `${money(item.amount)} por conta de ${item.labelForText}`).join(', ')
         const trimmedPix = pixKey.trim()
-        const copyMessage = `O valor que você tem que me passar é ${itemClauses}. Totalizando: ${money(summaryTotal)}.${
-          trimmedPix ? ` Essa é minha chave PIX: ${trimmedPix}` : ''
-        }`
+        const copyMessage =
+          unpaidSummaryItems.length > 0
+            ? `O valor que você tem que me passar é ${itemClauses}. Totalizando: ${money(summaryTotal)}.${
+                trimmedPix ? ` Essa é minha chave PIX: ${trimmedPix}` : ''
+              }`
+            : ''
 
         const closeParticipantSummary = () =>
           closeModalWithAnimation('participant-summary', () => setParticipantSummaryTarget(null))
 
         const handleCopySummary = async () => {
+          if (!copyMessage) return
           try {
             await navigator.clipboard.writeText(copyMessage)
             showToast('Resumo copiado para a área de transferência!')
@@ -3915,46 +4161,219 @@ function App() {
                   ×
                 </button>
               </div>
-              <div className="participant-summary-items">
-                {allSummaryItems.map(item => (
-                  <div className="participant-summary-row" key={item.key}>
-                    <div>
-                      <b>{item.description}</b>
-                      <small>{item.detail}</small>
-                    </div>
-                    <strong>{money(item.amount)}</strong>
-                  </div>
-                ))}
-                <div className="participant-summary-total">
-                  <span>Total a receber neste mês</span>
-                  <b>{money(summaryTotal)}</b>
-                </div>
-              </div>
-              <div className="participant-summary-preview-box">
-                <span className="participant-summary-preview-label">Mensagem que será copiada:</span>
-                <p>{copyMessage}</p>
-                {!trimmedPix && (
+              <div className="participant-summary-toolbar">
+                <span className="participant-summary-hint">
+                  Toque nas despesas que {participantSummaryTarget.name} já pagou para abatê-las da cobrança:
+                </span>
+                {expenseItems.length > 1 && (
                   <button
                     type="button"
-                    className="text-btn participant-summary-pix-link"
-                    onClick={() => {
-                      closeParticipantSummary()
-                      setView('Ajustes')
-                    }}
+                    className="text-btn participant-mark-all-btn"
+                    onClick={() => setAllParticipantSharesPaidInMonth(participantSummaryTarget.id, !allExpenseItemsPaid)}
                   >
-                    ＋ Cadastrar minha chave PIX nas Preferências para incluir no texto →
+                    {allExpenseItemsPaid ? 'Desmarcar todas' : '✓ Marcar todas como pagas'}
                   </button>
                 )}
               </div>
+              <div className="participant-summary-items">
+                {allSummaryItems.map(item => (
+                  <div className={`participant-summary-row ${item.paid ? 'is-paid' : ''}`} key={item.key}>
+                    <div className="participant-summary-row-info">
+                      <b>{item.description}</b>
+                      <small>{item.detail}</small>
+                    </div>
+                    <div className="participant-summary-row-right">
+                      <strong className={item.paid ? 'is-paid-amount' : ''}>{money(item.amount)}</strong>
+                      {item.expenseId && (
+                        <button
+                          type="button"
+                          className={`participant-paid-toggle ${item.paid ? 'is-paid' : ''}`}
+                          aria-pressed={item.paid}
+                          onClick={() => toggleParticipantSharePaid(item.expenseId!, item.part, participantSummaryTarget.id)}
+                          title={item.paid ? 'Desmarcar como pago' : 'Marcar esta despesa como paga'}
+                        >
+                          {item.paid ? '✓ Pago' : 'Marcar pago'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {paidSummaryTotal > 0 && (
+                  <div className="participant-summary-paid-sub">
+                    <span>Já pago neste mês</span>
+                    <b>✓ {money(paidSummaryTotal)}</b>
+                  </div>
+                )}
+                <div className="participant-summary-total">
+                  <span>{paidSummaryTotal > 0 ? 'Falta receber neste mês' : 'Total a receber neste mês'}</span>
+                  <b>{money(summaryTotal)}</b>
+                </div>
+              </div>
+              {copyMessage ? (
+                <div className="participant-summary-preview-box">
+                  <span className="participant-summary-preview-label">
+                    Mensagem que será copiada ({unpaidSummaryItems.length} {unpaidSummaryItems.length === 1 ? 'item pendente' : 'itens pendentes'}):
+                  </span>
+                  <p>{copyMessage}</p>
+                  {!trimmedPix && (
+                    <button
+                      type="button"
+                      className="text-btn participant-summary-pix-link"
+                      onClick={() => {
+                        closeParticipantSummary()
+                        setView('Ajustes')
+                      }}
+                    >
+                      ＋ Cadastrar minha chave PIX nas Preferências para incluir no texto →
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="participant-summary-settled-box" role="status">
+                  <span>🎉</span>
+                  <div>
+                    <b>Tudo quitado em {monthName(month)}!</b>
+                    <p>Todas as despesas de {participantSummaryTarget.name} neste mês foram marcadas como pagas. Seus gastos pessoais permanecem intactos.</p>
+                  </div>
+                </div>
+              )}
               <div className="modal-actions">
                 <button type="button" className="cancel-btn" onClick={closeParticipantSummary}>
                   Fechar
                 </button>
-                <button type="button" className="primary" onClick={handleCopySummary}>
-                  Copiar resumo
-                </button>
+                {copyMessage && (
+                  <button type="button" className="primary" onClick={handleCopySummary}>
+                    Copiar resumo
+                  </button>
+                )}
               </div>
             </section>
+          </div>
+        )
+      })()}
+
+      {advanceEditor && (() => {
+        const { occurrence: occ, countToAdvance, customAmount } = advanceEditor
+        const remaining = occ.installments - occ.part
+        const defaultAmt = computeAdvanceDefaultAmount(occ, countToAdvance)
+        const parsedCustom = parseMoneyInput(customAmount)
+        const validCustom = Number.isFinite(parsedCustom) && parsedCustom > 0 ? parsedCustom : 0
+        const discountSavings = Math.max(0, Math.round((defaultAmt - validCustom) * 100) / 100)
+        const firstFreedMonth = shiftMonthKey(occ.month, remaining - countToAdvance + 1)
+        const lastFreedMonth = shiftMonthKey(occ.month, remaining)
+
+        return (
+          <div
+            className={`modal-backdrop ${closingModal === 'advance' ? 'is-closing' : ''}`}
+            onMouseDown={event => {
+              if (event.target === event.currentTarget) closeAdvanceModal()
+            }}
+          >
+            <form
+              noValidate
+              className={`modal advance-modal ${formShake === 'advance' ? 'is-shaking' : ''}`}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="advance-modal-title"
+              onSubmit={confirmAdvanceInstallments}
+              onAnimationEnd={event => {
+                if (event.animationName === 'nexus-modal-shake') setFormShake(null)
+              }}
+            >
+              <div className="modal-header">
+                <div>
+                  <span className="eyebrow">ADIANTAR PARCELAS FUTURAS</span>
+                  <h2 id="advance-modal-title">{occ.description}</h2>
+                </div>
+                <button type="button" aria-label="Fechar adiantamento" onClick={closeAdvanceModal}>
+                  ×
+                </button>
+              </div>
+              <p className="form-help participant-modal-help">
+                Você está na <b>Parcela {occ.part} de {occ.installments}</b> ({monthName(occ.month)}). Ao adiantar, as parcelas escolhidas saem das faturas futuras e entram como pagamento único em <b>{monthName(occ.month)}</b>, mantendo os meses anteriores intactos.
+              </p>
+              <div className="advance-count-selector">
+                <span className="first-month-selector-label">
+                  Quantas parcelas futuras deseja adiantar?
+                  <small>Restam {remaining} {remaining === 1 ? 'parcela futura' : 'parcelas futuras'} após {shortMonthYear(occ.month)}</small>
+                </span>
+                <div className="advance-count-pills" role="radiogroup" aria-label="Quantidade de parcelas para adiantar">
+                  {Array.from({ length: remaining }, (_, i) => i + 1).map(num => {
+                    const isSelected = countToAdvance === num
+                    const amt = computeAdvanceDefaultAmount(occ, num)
+                    return (
+                      <button
+                        key={num}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        className={`first-month-pill ${isSelected ? 'is-selected' : ''}`}
+                        onClick={() => {
+                          setAdvanceError('')
+                          setAdvanceEditor({
+                            ...advanceEditor,
+                            countToAdvance: num,
+                            customAmount: formatMoneyInput(amt),
+                          })
+                        }}
+                      >
+                        <b>{num === remaining ? `Todas (${num})` : `${num} ${num === 1 ? 'parcela' : 'parcelas'}`}</b>
+                        <small>{money(amt)}</small>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <label className={advanceError ? 'is-invalid' : ''}>
+                Valor cobrado no adiantamento (com desconto, se houver)
+                <div className="money-input-wrap">
+                  <span className="money-prefix" aria-hidden="true">R$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    enterKeyHint="done"
+                    onKeyDown={dismissKeyboardOnEnter}
+                    aria-invalid={Boolean(advanceError)}
+                    placeholder="0,00"
+                    value={customAmount}
+                    onChange={e => {
+                      setAdvanceError('')
+                      setAdvanceEditor({ ...advanceEditor, customAmount: formatMoneyInput(e.target.value) })
+                    }}
+                  />
+                </div>
+                {advanceError ? (
+                  <small className="field-error-msg" role="alert">
+                    {advanceError}
+                  </small>
+                ) : (
+                  <small className="form-help">
+                    Valor original das {countToAdvance} {countToAdvance === 1 ? 'parcela' : 'parcelas'}: <b>{money(defaultAmt)}</b>.
+                    {discountSavings > 0 ? ` Economia com desconto: ${money(discountSavings)}!` : ' Se o banco deu desconto ao antecipar, digite o valor final acima.'}
+                  </small>
+                )}
+              </label>
+              <div className="billing-preview">
+                <span>⚡</span>
+                <div>
+                  Faturas liberadas:{' '}
+                  <b>
+                    {countToAdvance === 1
+                      ? monthName(lastFreedMonth)
+                      : `${shortMonthYear(firstFreedMonth)} até ${shortMonthYear(lastFreedMonth)}`}
+                  </b>
+                  . O lançamento original passará a ter <b>{occ.installments - countToAdvance}x</b> e o adiantamento de <b>{money(validCustom || defaultAmt)}</b> cairá em <b>{monthName(occ.month)}</b>.
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="cancel-btn" onClick={closeAdvanceModal}>
+                  Cancelar
+                </button>
+                <button className="primary" type="submit">
+                  Confirmar adiantamento
+                </button>
+              </div>
+            </form>
           </div>
         )
       })()}

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type React from 'react'
 import { type Data, type Expense, type Occurrence } from '../finance'
-import { blurActiveInputOnTouch, categorySymbol, money, type MainView, type SortOrder } from '../utils/format'
+import { blurActiveInputOnTouch, categorySymbol, money, shortMonthYear, type MainView, type SortOrder } from '../utils/format'
 
 type PageSizeOption = '10' | '20' | '50' | 'all'
 
@@ -17,6 +17,7 @@ type TransactionsTableProps = {
   filteredReimbursementTotal: number
   filteredInvoiceTotal: number
   hasActiveFilters: boolean
+  searchAllMonths: boolean
   query: string
   categoryFilter: string
   methodFilter: string
@@ -26,6 +27,7 @@ type TransactionsTableProps = {
   selectedVisibleIds: string[]
   allVisibleSelected: boolean
   filteredExpenseIds: string[]
+  onSearchAllMonthsChange: (value: boolean) => void
   onQueryChange: (value: string) => void
   onCategoryFilterChange: (value: string) => void
   onMethodFilterChange: (value: string) => void
@@ -39,6 +41,7 @@ type TransactionsTableProps = {
   onDownloadImage: () => void
   onEditExpense: (expense: Expense) => void
   onDuplicateExpense: (expense: Expense) => void
+  onOpenAdvanceInstallments: (occurrence: Occurrence) => void
   onDeleteExpense: (id: string) => void
   personalValue: (occurrence: Occurrence) => number
   owedBy: (occurrence: Occurrence) => string
@@ -56,6 +59,7 @@ export function TransactionsTable({
   filteredReimbursementTotal,
   filteredInvoiceTotal,
   hasActiveFilters,
+  searchAllMonths,
   query,
   categoryFilter,
   methodFilter,
@@ -65,6 +69,7 @@ export function TransactionsTable({
   selectedVisibleIds,
   allVisibleSelected,
   filteredExpenseIds,
+  onSearchAllMonthsChange,
   onQueryChange,
   onCategoryFilterChange,
   onMethodFilterChange,
@@ -78,6 +83,7 @@ export function TransactionsTable({
   onDownloadImage,
   onEditExpense,
   onDuplicateExpense,
+  onOpenAdvanceInstallments,
   onDeleteExpense,
   personalValue,
   owedBy,
@@ -177,7 +183,7 @@ export function TransactionsTable({
           <span>⌕</span>
           <input
             aria-label="Buscar lançamentos"
-            placeholder="Buscar lançamento..."
+            placeholder={searchAllMonths && view === 'Lançamentos' ? 'Buscar em todos os meses...' : 'Buscar lançamento...'}
             value={query}
             onChange={e => {
               setPage(1)
@@ -185,6 +191,31 @@ export function TransactionsTable({
             }}
           />
         </label>
+        {view === 'Lançamentos' && (
+          <div className="search-scope-toggle" role="group" aria-label="Período da busca">
+            <button
+              type="button"
+              className={!searchAllMonths ? 'is-active' : ''}
+              onClick={() => {
+                setPage(1)
+                onSearchAllMonthsChange(false)
+              }}
+            >
+              Neste mês
+            </button>
+            <button
+              type="button"
+              className={searchAllMonths ? 'is-active' : ''}
+              onClick={() => {
+                setPage(1)
+                onSearchAllMonthsChange(true)
+              }}
+              title="Buscar lançamentos e parcelas em todos os meses cadastrados"
+            >
+              🌐 Todos os meses
+            </button>
+          </div>
+        )}
         <select
           aria-label="Filtrar por categoria"
           value={categoryFilter}
@@ -339,7 +370,14 @@ export function TransactionsTable({
                         {categorySymbol(e.category, cat?.name)}
                       </span>
                       <span className="desc-text">
-                        <b>{e.description}</b>
+                        <b>
+                          {e.description}
+                          {searchAllMonths && view === 'Lançamentos' && (
+                            <span className="tx-month-badge" title="Mês de cobrança / fatura">
+                              {shortMonthYear(e.month)}
+                            </span>
+                          )}
+                        </b>
                         <small>
                           {e.installments > 1 ? `Parcela ${e.part} de ${e.installments}` : 'Despesa'}
                           {shared > 0 ? ` · ${debtor}` : ''}
@@ -371,6 +409,11 @@ export function TransactionsTable({
                     <details className="row-actions">
                       <summary aria-label={`Ações para ${e.description}`} title="Ações">···</summary>
                       <div className={`row-action-menu ${theme === 'dark' ? 'is-dark' : 'is-light'}`}>
+                        {e.installments > 1 && e.part < e.installments && (
+                          <button onClick={event => closeActionMenu(event, () => onOpenAdvanceInstallments(e))}>
+                            ⚡ Adiantar parcelas ({e.installments - e.part})
+                          </button>
+                        )}
                         <button onClick={event => closeActionMenu(event, () => onEditExpense(e))}>Editar</button>
                         <button onClick={event => closeActionMenu(event, () => onDuplicateExpense(e))}>Duplicar</button>
                         <button className="danger" onClick={event => closeActionMenu(event, () => onDeleteExpense(e.id))}>Excluir</button>
@@ -382,7 +425,25 @@ export function TransactionsTable({
             })}
           </tbody>
         </table>
-        {!filtered.length && <div className="empty">Nenhum lançamento encontrado neste mês.</div>}
+        {!filtered.length && (
+          <div className="empty">
+            {searchAllMonths && view === 'Lançamentos' ? (
+              'Nenhum lançamento encontrado em nenhum mês.'
+            ) : (
+              <>
+                Nenhum lançamento encontrado neste mês.
+                {view === 'Lançamentos' && query.trim() && (
+                  <>
+                    {' '}
+                    <button type="button" className="text-btn" onClick={() => onSearchAllMonthsChange(true)}>
+                      Buscar em todos os meses →
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
       <div className="table-foot">
         <div className="table-foot-left">

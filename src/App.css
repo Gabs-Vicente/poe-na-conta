@@ -1231,3 +1231,27 @@ footer{color:#89877f}
 .transfer-paste-row{display:flex;gap:8px;align-items:center;margin-top:6px}
 .transfer-paste-row input{margin-top:0!important;flex:1}
 .transfer-paste-row .outline-btn{height:38px;white-space:nowrap}
+
+/* Correções mobile: modais acima da barra inferior, Relatórios sem overflow, Recorrências e tabela de Investimentos */
+.modal-backdrop{z-index:30}
+.recurrence-count{white-space:nowrap;flex-shrink:0}
+.reports-page,.report-kpi-card,.report-panel,.relief-item-card,.installment-relief-panel{min-width:0;max-width:100%}
+.relief-milestones-bar{max-width:100%}
+.report-panel .table-wrap{max-width:100%;overflow-x:auto}
+
+@media(max-width:1050px){
+  .reports-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .reports-panels-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:600px){
+  .reports-kpi-grid{grid-template-columns:minmax(0,1fr);gap:11px}
+}
+@media(max-width:760px){
+  .modal-backdrop{padding:12px 12px max(12px,env(safe-area-inset-bottom))}
+  .modal,.expense-modal,.onboarding-modal{max-height:calc(100dvh - 24px);overflow-y:auto}
+  .inv-history-table .col-date,.inv-history-table .col-note{display:none}
+  .inv-history-table th,.inv-history-table td{padding-left:8px;padding-right:8px}
+  .inv-history-table th:first-child,.inv-history-table td:first-child{padding-left:12px}
+  .inv-history-table td:first-child b{display:block;white-space:normal;word-break:break-word;line-height:1.3}
+  .inv-history-table th:last-child,.inv-history-table td:last-child{padding-right:10px;width:40px}
+}

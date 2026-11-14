@@ -383,13 +383,13 @@ export function InvestmentsView({
           )}
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="inv-history-table">
             <thead>
               <tr>
                 <th>INVESTIMENTO</th>
                 <th>TIPO</th>
-                <th>DATA</th>
-                <th>OBSERVAÇÃO</th>
+                <th className="col-date">DATA</th>
+                <th className="col-note">OBSERVAÇÃO</th>
                 <th className="right">VALOR</th>
                 <th className="col-actions" />
               </tr>
@@ -403,12 +403,16 @@ export function InvestmentsView({
                   <tr key={entry.id}>
                     <td>
                       <b>{entry.investmentName}</b>
+                      <small className="mobile-tx-meta">
+                        {formattedDate}
+                        {entry.note ? ` · ${entry.note}` : ''}
+                      </small>
                     </td>
                     <td>
                       <span className={`inv-entry-badge is-${entry.type}`}>{ENTRY_LABEL[entry.type]}</span>
                     </td>
-                    <td className="date-cell">{formattedDate}</td>
-                    <td>{entry.note || '—'}</td>
+                    <td className="date-cell col-date">{formattedDate}</td>
+                    <td className="col-note">{entry.note || '—'}</td>
                     <td className={`right value ${entry.type === 'aporte' ? 'inv-val-positive' : entry.type === 'resgate' ? 'inv-val-negative' : ''}`}>
                       {entry.type === 'aporte' ? '+ ' : entry.type === 'resgate' ? '− ' : ''}
                       {money(entry.amount)}

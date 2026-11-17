@@ -32,6 +32,7 @@ import {
   type ConfirmDialog,
   type OnboardingStartMode,
 } from './components/modals/AppUtilityModals'
+import { QuickTransferModals } from './components/modals/QuickTransferModals'
 import {
   buildInstallmentRelief,
   buildOccurrences as calculateOccurrences,
@@ -79,6 +80,12 @@ import {
   type SortOrder,
 } from './utils/format'
 import { exportReportImage, exportStyledSpreadsheet } from './utils/exportReport'
+import {
+  decodeQuickTransfer,
+  mergeQuickTransferIntoData,
+  QUICK_TRANSFER_HASH_PREFIX,
+  type QuickExpenseTransferPayload,
+} from './utils/quickTransfer'
 
 type ModalKind =
   | 'expense'
@@ -96,6 +103,9 @@ type ModalKind =
   | 'reset'
   | 'confirm'
   | 'pwa-guide'
+  | 'quick-share'
+  | 'quick-import'
+  | 'quick-paste'
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
 
 const MODAL_CLOSE_DURATION_MS = 220
@@ -224,6 +234,9 @@ function App() {
   const [investmentMoveErrors, setInvestmentMoveErrors] = useState<Record<string, string>>({})
   const [goalEditor, setGoalEditor] = useState<ReserveGoalEditor | null>(null)
   const [goalErrors, setGoalErrors] = useState<Record<string, string>>({})
+  const [quickShareExpenses, setQuickShareExpenses] = useState<Expense[] | null>(null)
+  const [pendingQuickImport, setPendingQuickImport] = useState<QuickExpenseTransferPayload | null>(null)
+  const [pasteQuickImportOpen, setPasteQuickImportOpen] = useState(false)
   const [recurrenceSelection, setRecurrenceSelection] = useState<string[] | null>(null)
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([])
   const [form, setForm] = useState<ExpenseForm>(() => ({
@@ -290,7 +303,10 @@ function App() {
     resetDataModalOpen ||
     pwaGuideOpen ||
     easterEggOpen ||
-    pendingBackupImport,
+    pendingBackupImport ||
+    quickShareExpenses ||
+    pendingQuickImport ||
+    pasteQuickImportOpen,
   )
 
   const handleMainTouchStart = (event: React.TouchEvent<HTMLElement>) => {
@@ -2343,6 +2359,51 @@ function App() {
     })
   }
 
+  useEffect(() => {
+    const checkHashQuickImport = () => {
+      const hash = window.location.hash
+      if (!hash.startsWith(QUICK_TRANSFER_HASH_PREFIX)) return
+      const decoded = decodeQuickTransfer(hash)
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      if (decoded) {
+        setPendingQuickImport(decoded)
+      } else {
+        showToast('Link de lançamento inválido ou incompleto.')
+      }
+    }
+    checkHashQuickImport()
+    window.addEventListener('hashchange', checkHashQuickImport)
+    return () => window.removeEventListener('hashchange', checkHashQuickImport)
+  }, [])
+
+  const openQuickShare = (expensesToShare: Expense[]) => {
+    const cleanExpenses = expensesToShare
+      .map(item => data.expenses.find(exp => exp.id === item.id) || item)
+      .filter((exp, idx, arr) => arr.findIndex(other => other.id === exp.id) === idx)
+    if (cleanExpenses.length > 0) setQuickShareExpenses(cleanExpenses)
+  }
+
+  const closeQuickShare = () => closeModalWithAnimation('quick-share', () => setQuickShareExpenses(null))
+  const closeQuickImport = () => closeModalWithAnimation('quick-import', () => setPendingQuickImport(null))
+  const closePasteQuickImport = () => closeModalWithAnimation('quick-paste', () => setPasteQuickImportOpen(false))
+
+  const confirmQuickImport = (duplicatePolicy: 'skip' | 'update') => {
+    if (!pendingQuickImport) return
+    const result = mergeQuickTransferIntoData(data, pendingQuickImport, duplicatePolicy)
+    if (result.addedCount === 0 && result.updatedCount === 0) {
+      closeQuickImport()
+      showToast('Nenhum lançamento novo para importar.')
+      return
+    }
+    if (save(result.nextData)) {
+      closeQuickImport()
+      const parts: string[] = []
+      if (result.addedCount > 0) parts.push(`${result.addedCount} ${result.addedCount === 1 ? 'lançamento importado' : 'lançamentos importados'}`)
+      if (result.updatedCount > 0) parts.push(`${result.updatedCount} ${result.updatedCount === 1 ? 'atualizado' : 'atualizados'}`)
+      showToast(`${parts.join(', ')}!`)
+    }
+  }
+
   const transactionTable = (
     <TransactionsTable
       view={view}
@@ -2376,6 +2437,7 @@ function App() {
       onToggleSelectAllVisible={toggleSelectAllVisible}
       onToggleSelectExpense={toggleSelectExpense}
       onDeleteSelectedExpenses={deleteSelectedExpenses}
+      onShareExpenses={openQuickShare}
       onDownloadCsv={downloadCsv}
       onDownloadImage={downloadReportImage}
       onEditExpense={editExpense}
@@ -2699,6 +2761,7 @@ function App() {
               onDownloadBackup={downloadBackup}
               onShareBackup={shareBackup}
               onTriggerBackupImport={() => backupInput.current?.click()}
+              onOpenPasteQuickImport={() => setPasteQuickImportOpen(true)}
               onDownloadCsv={downloadCsv}
               onOpenResetDataModal={openResetDataModal}
             />
@@ -2996,6 +3059,20 @@ function App() {
         clearGoalError={key => clearFieldError(setGoalErrors, key)}
         closeGoalModal={closeGoalModal}
         saveGoal={saveGoal}
+      />
+
+      <QuickTransferModals
+        closingModal={closingModal}
+        data={data}
+        shareExpenses={quickShareExpenses}
+        onCloseShare={closeQuickShare}
+        pendingImport={pendingQuickImport}
+        onCloseImport={closeQuickImport}
+        onConfirmImport={confirmQuickImport}
+        pasteImportOpen={pasteQuickImportOpen}
+        onClosePasteImport={closePasteQuickImport}
+        onSubmitPasteCode={payload => setPendingQuickImport(payload)}
+        onToast={showToast}
       />
     </div>
   )

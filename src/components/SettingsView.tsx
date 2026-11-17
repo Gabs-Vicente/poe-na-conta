@@ -34,6 +34,7 @@ type SettingsViewProps = {
   onDownloadBackup: () => void
   onShareBackup: () => void
   onTriggerBackupImport: () => void
+  onOpenPasteQuickImport: () => void
   onDownloadCsv: () => void
   onOpenResetDataModal: () => void
 }
@@ -69,6 +70,7 @@ export function SettingsView({
   onDownloadBackup,
   onShareBackup,
   onTriggerBackupImport,
+  onOpenPasteQuickImport,
   onDownloadCsv,
   onOpenResetDataModal,
 }: SettingsViewProps) {
@@ -346,6 +348,9 @@ export function SettingsView({
           </button>
           <button className="outline-btn" onClick={onTriggerBackupImport}>
             Importar backup
+          </button>
+          <button type="button" className="outline-btn" onClick={onOpenPasteQuickImport}>
+            📲 Receber lançamento (link/código)
           </button>
           <button className="outline-btn" onClick={onDownloadCsv}>
             📊 Exportar planilha do mês

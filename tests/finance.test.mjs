@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildInstallmentRelief, buildOccurrences, cardDueMonth, createBackup, csvCell, expenseFirstMonth, formatMoneyInput, normalizeData, normalizeDateInput, occurrencePersonalValue, parseBackup, parseBackupFile, parseMoneyInput, QUICK_THIRD_PARTY_ID, quickSplitThirdPartyAmount, readStoredData, seed, splitAmountAmongParticipantsOnly, splitAmountEquallyWithMe, validateData } from '../src/finance.ts'
+import { decodeQuickTransfer, encodeQuickTransfer, mergeQuickTransferIntoData } from '../src/utils/quickTransfer.ts'
 
 const card = { id: 'card', name: 'Principal', closingDay: 25, dueDay: 5, closingDayRule: 'after' }
 const cardClosing30 = { id: 'card30', name: 'Cartão dia 30', closingDay: 30, dueDay: 10, closingDayRule: 'after' }
@@ -324,4 +325,63 @@ test('preserva investimentos, movimentacoes e metas de reserva no backup', () =>
   assert.equal(parsed?.investments?.[0].entries?.length, 2)
   assert.equal(parsed?.investments?.[0].entries?.[1].type, 'atualizacao')
 })
+
+test('codifica, decodifica e mescla lançamento individual com vínculo por nome e proteção contra duplicata', () => {
+  const sourceData = {
+    ...seed,
+    categories: [{ id: 'cat-pc-1', name: 'Alimentação', color: '#b88b63' }],
+    cards: [{ id: 'card-pc-1', name: 'Nubank', closingDay: 20, dueDay: 27, closingDayRule: 'after' }],
+    participants: [{ id: 'part-pc-1', name: 'Maria' }],
+    expenses: [
+      {
+        id: 'exp-quick-1',
+        description: 'Jantar Japonês',
+        amount: 200,
+        date: '2026-11-17',
+        category: 'cat-pc-1',
+        method: 'Crédito à vista',
+        cardId: 'card-pc-1',
+        installments: 1,
+        firstMonth: '2026-11',
+        shares: [{ participantId: 'part-pc-1', amount: 100 }],
+      },
+    ],
+  }
+
+  const encoded = encodeQuickTransfer(sourceData.expenses, sourceData)
+  const decoded = decodeQuickTransfer(`https://gabs-vicente.github.io/poe-na-conta/#import-tx=${encoded}`)
+  assert.ok(decoded)
+  assert.equal(decoded.items.length, 1)
+  assert.equal(decoded.items[0].expense.description, 'Jantar Japonês')
+
+  const targetData = {
+    ...seed,
+    categories: [{ id: 'cat-cel-9', name: 'alimentação', color: '#b88b63' }],
+    cards: [{ id: 'principal', name: 'Cartão principal', closingDay: 25, dueDay: 5 }],
+    participants: [],
+    expenses: [],
+  }
+
+  const firstMerge = mergeQuickTransferIntoData(targetData, decoded, 'skip')
+  assert.equal(firstMerge.addedCount, 1)
+  assert.equal(firstMerge.updatedCount, 0)
+  assert.equal(firstMerge.nextData.expenses.length, 1)
+  assert.equal(firstMerge.nextData.expenses[0].category, 'cat-cel-9')
+  assert.equal(firstMerge.nextData.cards.some(c => c.name === 'Nubank'), true)
+  assert.equal(firstMerge.nextData.participants.some(p => p.name === 'Maria'), true)
+
+  const duplicateSkip = mergeQuickTransferIntoData(firstMerge.nextData, decoded, 'skip')
+  assert.equal(duplicateSkip.addedCount, 0)
+  assert.equal(duplicateSkip.skippedCount, 1)
+  assert.equal(duplicateSkip.nextData.expenses.length, 1)
+
+  const updatedPayload = {
+    ...decoded,
+    items: [{ ...decoded.items[0], expense: { ...decoded.items[0].expense, amount: 240 } }],
+  }
+  const duplicateUpdate = mergeQuickTransferIntoData(firstMerge.nextData, updatedPayload, 'update')
+  assert.equal(duplicateUpdate.updatedCount, 1)
+  assert.equal(duplicateUpdate.nextData.expenses[0].amount, 240)
+})
+
 

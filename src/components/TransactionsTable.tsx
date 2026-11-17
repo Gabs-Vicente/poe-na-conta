@@ -37,6 +37,7 @@ type TransactionsTableProps = {
   onToggleSelectAllVisible: (checked: boolean) => void
   onToggleSelectExpense: (id: string, checked: boolean) => void
   onDeleteSelectedExpenses: () => void
+  onShareExpenses: (expenses: Expense[]) => void
   onDownloadCsv: () => void
   onDownloadImage: () => void
   onEditExpense: (expense: Expense) => void
@@ -79,6 +80,7 @@ export function TransactionsTable({
   onToggleSelectAllVisible,
   onToggleSelectExpense,
   onDeleteSelectedExpenses,
+  onShareExpenses,
   onDownloadCsv,
   onDownloadImage,
   onEditExpense,
@@ -304,6 +306,13 @@ export function TransactionsTable({
             <button type="button" className="cancel-btn bulk-clear-btn" onClick={() => onToggleSelectAllVisible(false)}>
               Limpar seleção
             </button>
+            <button
+              type="button"
+              className="outline-btn bulk-share-btn"
+              onClick={() => onShareExpenses(data.expenses.filter(exp => selectedVisibleIds.includes(exp.id)))}
+            >
+              Enviar / QR ({selectedVisibleIds.length})
+            </button>
             <button type="button" className="danger-btn bulk-delete-btn" onClick={onDeleteSelectedExpenses}>
               Excluir selecionados ({selectedVisibleIds.length})
             </button>
@@ -415,6 +424,7 @@ export function TransactionsTable({
                           </button>
                         )}
                         <button onClick={event => closeActionMenu(event, () => onEditExpense(e))}>Editar</button>
+                        <button onClick={event => closeActionMenu(event, () => onShareExpenses([e]))}>Enviar / QR Code</button>
                         <button onClick={event => closeActionMenu(event, () => onDuplicateExpense(e))}>Duplicar</button>
                         <button className="danger" onClick={event => closeActionMenu(event, () => onDeleteExpense(e.id))}>Excluir</button>
                       </div>

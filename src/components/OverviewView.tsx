@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type React from 'react'
 import {
   INVESTMENT_TYPE_META,
@@ -26,6 +26,8 @@ type CardSummaryItem = {
   card: Card
   invoiceTotal: number
   personalPart: number
+  unpaidPersonalPart: number
+  allPaid: boolean
   sharedPart: number
   count: number
   nextInvoiceTotal: number
@@ -48,6 +50,9 @@ type OverviewViewProps = {
   month: string
   previousMonth: string
   total: number
+  hasCreditInMonth: boolean
+  paidPersonalTotal: number
+  unpaidPersonalTotal: number
   monthChange: number | null
   reimbursementTotal: number
   upcomingTotal: number
@@ -74,6 +79,7 @@ type OverviewViewProps = {
   onCategoryPanelModeChange: (mode: 'categories' | 'transactions') => void
   onHoveredCategoryIdChange: (id: string | null) => void
   onOpenCardTransactions: (cardId: string) => void
+  onToggleCardPaidInMonth: (cardId: string) => void
   onOpenCardSettings: () => void
   onOpenNewExpenseModal: () => void
   onOpenManualReimbursement: (item?: ManualReimbursement) => void
@@ -94,6 +100,9 @@ export function OverviewView({
   month,
   previousMonth,
   total,
+  hasCreditInMonth,
+  paidPersonalTotal,
+  unpaidPersonalTotal,
   monthChange,
   reimbursementTotal,
   upcomingTotal,
@@ -120,6 +129,7 @@ export function OverviewView({
   onCategoryPanelModeChange,
   onHoveredCategoryIdChange,
   onOpenCardTransactions,
+  onToggleCardPaidInMonth,
   onOpenCardSettings,
   onOpenManualReimbursement,
   onDeleteManualReimbursement,
@@ -129,6 +139,9 @@ export function OverviewView({
   owedBy,
 }: OverviewViewProps) {
   const nextRelief = installmentRelief.milestones[0]
+  const [insightCategoryIndex, setInsightCategoryIndex] = useState(0)
+  const [insightDirection, setInsightDirection] = useState<'next' | 'prev'>('next')
+  const insightDragStartX = useRef<number | null>(null)
   const [cardsCollapsed, setCardsCollapsed] = useState(() => {
     try {
       return localStorage.getItem('poe-na-conta-cards-collapsed') === '1'
@@ -413,7 +426,15 @@ export function OverviewView({
             <span className="stat-symbol">↘</span>
           </div>
           <strong>{money(total)}</strong>
-          <div className="stat-foot">Sua parte em {monthName(month)}</div>
+          <div className="stat-foot">
+            {hasCreditInMonth ? (
+              <span className="paid-balance-line">
+                Falta pagar: <b>{money(unpaidPersonalTotal)}</b> · ✓ Pago: {money(paidPersonalTotal)}
+              </span>
+            ) : (
+              `Sua parte em ${monthName(month)}`
+            )}
+          </div>
           <div className="sparkline">
             <svg viewBox="0 0 240 50" preserveAspectRatio="none">
               <path d="M0 40 C18 37 22 29 37 34 S56 31 67 30 S82 39 97 29 S118 24 129 29 S151 12 162 20 S178 29 187 19 S210 23 219 7 S233 17 240 6" fill="none" stroke="#7be1c4" strokeWidth="2" />
@@ -483,87 +504,146 @@ export function OverviewView({
           </div>
           <div className="trend-foot">O gráfico mostra os 12 meses do ano selecionado. Anos sem lançamentos não aparecem na lista.</div>
         </div>
-        <div className="panel health-insight">
-          <div className="panel-head">
-            <div>
-              <h2>Leitura do seu mês</h2>
-              <p>Indicadores com base nos lançamentos</p>
-            </div>
-            <span className="calendar-icon">✳</span>
-          </div>
-          {categoryTotals.length ? (
-            (() => {
-              const topCategory = categoryTotals[0]
-              const topSharePercent = total ? Math.round((topCategory.total / total) * 100) : 0
-              const topCategoryExpenses = currentExpenses
-                .filter(e => e.category === topCategory.id && personalValue(e) > 0)
-                .sort((a, b) => personalValue(b) - personalValue(a))
-                .slice(0, 3)
-              return (
-                <>
-                  <div className="insight-top-category">
-                    <span
-                      className="category-icon insight-category-icon"
-                      style={{ color: topCategory.color, background: `${topCategory.color}22` }}
-                    >
-                      {categorySymbol(topCategory.id, topCategory.name)}
-                    </span>
-                    <div className="insight-number">
-                      <div className="insight-title-row">
-                        <span>{topCategory.name}</span>
-                        <b className="insight-cat-amount">{money(topCategory.total)}</b>
-                      </div>
-                      <small>é sua maior categoria ({topSharePercent}% dos gastos pessoais)</small>
-                    </div>
-                  </div>
-                  <div className="track insight-track">
-                    <i style={{ width: `${Math.min(100, topSharePercent)}%`, background: topCategory.color }} />
-                  </div>
-                  {topCategoryExpenses.length > 0 && (
-                    <div className="insight-top-expenses">
-                      <span className="insight-top-expenses-title">
-                        Top {topCategoryExpenses.length} {topCategoryExpenses.length === 1 ? 'maior gasto' : 'maiores gastos'} em {topCategory.name}
-                      </span>
-                      <div className="insight-top-expenses-list">
-                        {topCategoryExpenses.map((item, idx) => (
-                          <div className="insight-top-expense-row" key={`${item.id}-${item.part}`}>
-                            <span
-                              className="insight-rank-badge"
-                              style={{ color: topCategory.color, background: `${topCategory.color}20` }}
-                            >
-                              {idx + 1}º
-                            </span>
-                            <div className="insight-expense-desc">
-                              <b>{item.description}</b>
-                              {item.installments > 1 && (
-                                <small>
-                                  Parcela {item.part}/{item.installments}
-                                </small>
-                              )}
+        {(() => {
+          const topInsightCategories = categoryTotals.filter(c => c.total > 0).slice(0, 3)
+          const insightCount = topInsightCategories.length
+          const activeInsightIndex = insightCount > 0 ? insightCategoryIndex % insightCount : 0
+          const stepInsight = (delta: number) => {
+            if (insightCount <= 1) return
+            setInsightDirection(delta >= 0 ? 'next' : 'prev')
+            setInsightCategoryIndex(prev => ((prev % insightCount) + delta + insightCount) % insightCount)
+          }
+          const jumpInsight = (idx: number) => {
+            if (idx === activeInsightIndex) return
+            setInsightDirection(idx > activeInsightIndex ? 'next' : 'prev')
+            setInsightCategoryIndex(idx)
+          }
+          const handleInsightPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+            if (insightCount <= 1) return
+            if ((event.target as HTMLElement).closest('button')) return
+            insightDragStartX.current = event.clientX
+          }
+          const handleInsightPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+            if (insightDragStartX.current === null || insightCount <= 1) return
+            const deltaX = event.clientX - insightDragStartX.current
+            insightDragStartX.current = null
+            if (Math.abs(deltaX) < 36) return
+            stepInsight(deltaX < 0 ? 1 : -1)
+          }
+
+          return (
+            <div
+              className={`panel health-insight ${insightCount > 1 ? 'is-swipeable' : ''}`}
+              data-no-swipe="true"
+              onPointerDown={handleInsightPointerDown}
+              onPointerUp={handleInsightPointerUp}
+              onPointerCancel={() => {
+                insightDragStartX.current = null
+              }}
+            >
+              <div className="panel-head">
+                <div>
+                  <h2>Leitura do seu mês</h2>
+                  <p>Indicadores com base nos lançamentos</p>
+                </div>
+                <span className="calendar-icon">✳</span>
+              </div>
+              {insightCount > 0 ? (
+                (() => {
+                  const topCategory = topInsightCategories[activeInsightIndex]
+                  const topSharePercent = total ? Math.round((topCategory.total / total) * 100) : 0
+                  const topCategoryExpenses = currentExpenses
+                    .filter(e => e.category === topCategory.id && personalValue(e) > 0)
+                    .sort((a, b) => personalValue(b) - personalValue(a))
+                    .slice(0, 3)
+                  const rankLabel =
+                    activeInsightIndex === 0
+                      ? 'é sua maior categoria'
+                      : `é sua ${activeInsightIndex + 1}ª maior categoria`
+                  return (
+                    <>
+                      <div key={topCategory.id} className={`insight-slide-stage is-${insightDirection}`}>
+                        <div className="insight-top-category">
+                          <span
+                            className="category-icon insight-category-icon"
+                            style={{ color: topCategory.color, background: `${topCategory.color}22` }}
+                          >
+                            {categorySymbol(topCategory.id, topCategory.name)}
+                          </span>
+                          <div className="insight-number">
+                            <div className="insight-title-row">
+                              <span>{topCategory.name}</span>
+                              <b className="insight-cat-amount">{money(topCategory.total)}</b>
                             </div>
-                            <strong className="insight-expense-val">{money(personalValue(item))}</strong>
+                            <small>{rankLabel} ({topSharePercent}% dos gastos pessoais)</small>
                           </div>
-                        ))}
+                        </div>
+                        <div className="track insight-track">
+                          <i style={{ width: `${Math.min(100, topSharePercent)}%`, background: topCategory.color }} />
+                        </div>
+                        {topCategoryExpenses.length > 0 && (
+                          <div className="insight-top-expenses">
+                            <span className="insight-top-expenses-title">
+                              Top {topCategoryExpenses.length} {topCategoryExpenses.length === 1 ? 'maior gasto' : 'maiores gastos'} em {topCategory.name}
+                            </span>
+                            <div className="insight-top-expenses-list">
+                              {topCategoryExpenses.map((item, idx) => (
+                                <div className="insight-top-expense-row" key={`${item.id}-${item.part}`}>
+                                  <span
+                                    className="insight-rank-badge"
+                                    style={{ color: topCategory.color, background: `${topCategory.color}20` }}
+                                  >
+                                    {idx + 1}º
+                                  </span>
+                                  <div className="insight-expense-desc">
+                                    <b>{item.description}</b>
+                                    {item.installments > 1 && (
+                                      <small>
+                                        Parcela {item.part}/{item.installments}
+                                      </small>
+                                    )}
+                                  </div>
+                                  <strong className="insight-expense-val">{money(personalValue(item))}</strong>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
-                  <div className="health-callout">
-                    <span>↗</span>
-                    <p>
-                      {monthChange === null
-                        ? 'Registre seus gastos mês a mês para criar uma comparação.'
-                        : monthChange > 0
-                          ? `Os gastos previstos subiram ${Math.abs(monthChange).toFixed(0)}% frente ao mês anterior.`
-                          : `Os gastos previstos caíram ${Math.abs(monthChange).toFixed(0)}% frente ao mês anterior.`}
-                    </p>
-                  </div>
-                </>
-              )
-            })()
-          ) : (
-            <div className="empty">Adicione lançamentos para ver os indicadores do mês.</div>
-          )}
-        </div>
+                      {insightCount > 1 && (
+                        <div className="insight-dots" role="tablist" aria-label="Alternar entre as maiores categorias">
+                          {topInsightCategories.map((cat, idx) => (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={idx === activeInsightIndex}
+                              aria-label={`Ver ${cat.name} (${idx + 1} de ${insightCount})`}
+                              className={`insight-dot ${idx === activeInsightIndex ? 'is-active' : ''}`}
+                              onClick={() => jumpInsight(idx)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      <div className="health-callout">
+                        <span>↗</span>
+                        <p>
+                          {monthChange === null
+                            ? 'Registre seus gastos mês a mês para criar uma comparação.'
+                            : monthChange > 0
+                              ? `Os gastos previstos subiram ${Math.abs(monthChange).toFixed(0)}% frente ao mês anterior.`
+                              : `Os gastos previstos caíram ${Math.abs(monthChange).toFixed(0)}% frente ao mês anterior.`}
+                        </p>
+                      </div>
+                    </>
+                  )
+                })()
+              ) : (
+                <div className="empty">Adicione lançamentos para ver os indicadores do mês.</div>
+              )}
+            </div>
+          )
+        })()}
         <div className="panel category-panel">
           <div className="panel-head">
             <div>
@@ -848,8 +928,8 @@ export function OverviewView({
           {!cardsCollapsed && (
             cardSummaries.length ? (
               <div className="cards-summary-grid">
-                {cardSummaries.map(({ card, invoiceTotal, personalPart, sharedPart, count, nextInvoiceTotal }) => (
-                  <div className="card-summary-item" key={card.id}>
+                {cardSummaries.map(({ card, invoiceTotal, personalPart, unpaidPersonalPart, allPaid, sharedPart, count, nextInvoiceTotal }) => (
+                  <div className={`card-summary-item ${allPaid ? 'is-paid' : ''}`} key={card.id}>
                     <div className="card-summary-top">
                       <div className="card-summary-title">
                         <span className="card-icon">{card.kind === 'store' ? '🛍️' : card.kind === 'borrowed' ? '🤝' : '🏦'}</span>
@@ -864,9 +944,22 @@ export function OverviewView({
                           </small>
                         </div>
                       </div>
-                      <button type="button" className="text-btn card-summary-link" onClick={() => onOpenCardTransactions(card.id)}>
-                        Ver fatura →
-                      </button>
+                      <div className="card-summary-actions">
+                        {count > 0 && (
+                          <button
+                            type="button"
+                            className={`participant-paid-toggle ${allPaid ? 'is-paid' : ''}`}
+                            aria-pressed={allPaid}
+                            onClick={() => onToggleCardPaidInMonth(card.id)}
+                            title={allPaid ? 'Reabrir fatura do mês' : 'Marcar toda a fatura deste mês como paga'}
+                          >
+                            {allPaid ? '✓ Fatura paga' : 'Quitar fatura'}
+                          </button>
+                        )}
+                        <button type="button" className="text-btn card-summary-link" onClick={() => onOpenCardTransactions(card.id)}>
+                          Ver fatura →
+                        </button>
+                      </div>
                     </div>
                     <div className="card-summary-amount">
                       <span>Total da fatura ({count} {count === 1 ? 'item' : 'itens'})</span>
@@ -874,6 +967,9 @@ export function OverviewView({
                     </div>
                     <div className="card-summary-breakdown">
                       <span>Sua parte: <b>{money(personalPart)}</b></span>
+                      {unpaidPersonalPart < personalPart && (
+                        <span>Falta pagar: <b>{money(unpaidPersonalPart)}</b></span>
+                      )}
                       {sharedPart > 0 && <span>Terceiros: <b>{money(sharedPart)}</b></span>}
                       <span>Próx. mês: <b>{money(nextInvoiceTotal)}</b></span>
                     </div>

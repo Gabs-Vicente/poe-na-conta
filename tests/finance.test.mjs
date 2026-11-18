@@ -384,4 +384,31 @@ test('codifica, decodifica e mescla lançamento individual com vínculo por nome
   assert.equal(duplicateUpdate.nextData.expenses[0].amount, 240)
 })
 
+test('preserva paidInstallments do lançamento no buildOccurrences e no backup', () => {
+  const expenses = [
+    {
+      id: 'exp-paid-1',
+      description: 'Notebook',
+      amount: 1200,
+      date: '2026-11-10',
+      category: 'lazer',
+      method: 'Crédito parcelado',
+      cardId: 'principal',
+      installments: 3,
+      firstMonth: '2026-11',
+      paidInstallments: [1],
+    },
+  ]
+
+  const occurrences = buildOccurrences(expenses)
+  assert.equal(occurrences.length, 3)
+  assert.equal(occurrences[0].paid, true)
+  assert.equal(occurrences[1].paid, undefined)
+  assert.equal(occurrences[2].paid, undefined)
+
+  const parsed = parseBackup(createBackup({ ...seed, expenses, recurrences: [] }))
+  assert.deepEqual(parsed?.expenses[0].paidInstallments, [1])
+})
+
+
 

@@ -22,6 +22,7 @@ type TransactionsTableProps = {
   categoryFilter: string
   methodFilter: string
   cardFilter: string
+  statusFilter: 'all' | 'paid' | 'unpaid'
   sortOrder: SortOrder
   selectedExpenseIds: string[]
   selectedVisibleIds: string[]
@@ -32,12 +33,18 @@ type TransactionsTableProps = {
   onCategoryFilterChange: (value: string) => void
   onMethodFilterChange: (value: string) => void
   onCardFilterChange: (value: string) => void
+  onStatusFilterChange: (value: 'all' | 'paid' | 'unpaid') => void
   onSortOrderChange: (value: SortOrder) => void
   onClearAllFilters: () => void
   onToggleSelectAllVisible: (checked: boolean) => void
   onToggleSelectExpense: (id: string, checked: boolean) => void
   onDeleteSelectedExpenses: () => void
+  onMarkSelectedExpensesPaid: (paid: boolean) => void
   onShareExpenses: (expenses: Expense[]) => void
+  onToggleExpensePaid: (expenseId: string, part: number) => void
+  hasCreditInMonth: boolean
+  paidTotal: number
+  unpaidTotal: number
   onDownloadCsv: () => void
   onDownloadImage: () => void
   onEditExpense: (expense: Expense) => void
@@ -65,6 +72,7 @@ export function TransactionsTable({
   categoryFilter,
   methodFilter,
   cardFilter,
+  statusFilter,
   sortOrder,
   selectedExpenseIds,
   selectedVisibleIds,
@@ -75,12 +83,18 @@ export function TransactionsTable({
   onCategoryFilterChange,
   onMethodFilterChange,
   onCardFilterChange,
+  onStatusFilterChange,
   onSortOrderChange,
   onClearAllFilters,
   onToggleSelectAllVisible,
   onToggleSelectExpense,
   onDeleteSelectedExpenses,
+  onMarkSelectedExpensesPaid,
   onShareExpenses,
+  onToggleExpensePaid,
+  hasCreditInMonth,
+  paidTotal,
+  unpaidTotal,
   onDownloadCsv,
   onDownloadImage,
   onEditExpense,
@@ -153,7 +167,13 @@ export function TransactionsTable({
             <i className="data-summary-icon" aria-hidden="true">↘</i>
           </div>
           <b>{money(hasActiveFilters ? filteredPersonalTotal : total)}</b>
-          <small>{hasActiveFilters ? 'Sua parte nos itens filtrados' : 'Sua parte líquida no mês'}</small>
+          <small>
+            {hasActiveFilters
+              ? 'Sua parte nos itens filtrados'
+              : hasCreditInMonth
+                ? `Falta pagar: ${money(unpaidTotal)} · ✓ Pago: ${money(paidTotal)}`
+                : 'Sua parte líquida no mês'}
+          </small>
         </div>
         <div className="data-summary-card">
           <div className="data-summary-head">
@@ -271,6 +291,18 @@ export function TransactionsTable({
           </select>
         )}
         <select
+          aria-label="Filtrar por status de pagamento"
+          value={statusFilter}
+          onChange={e => {
+            setPage(1)
+            onStatusFilterChange(e.target.value as 'all' | 'paid' | 'unpaid')
+          }}
+        >
+          <option value="all">Todos os status</option>
+          <option value="unpaid">Em aberto (a pagar)</option>
+          <option value="paid">Pagas / quitadas</option>
+        </select>
+        <select
           aria-label="Ordenar lançamentos"
           value={sortOrder}
           onChange={e => {
@@ -306,6 +338,15 @@ export function TransactionsTable({
             <button type="button" className="cancel-btn bulk-clear-btn" onClick={() => onToggleSelectAllVisible(false)}>
               Limpar seleção
             </button>
+            {filtered.some(e => selectedVisibleIds.includes(e.id) && e.method.startsWith('Crédito')) && (
+              <button
+                type="button"
+                className="outline-btn bulk-share-btn"
+                onClick={() => onMarkSelectedExpensesPaid(true)}
+              >
+                ✓ Marcar pagos ({filtered.filter(e => selectedVisibleIds.includes(e.id) && e.method.startsWith('Crédito')).length})
+              </button>
+            )}
             <button
               type="button"
               className="outline-btn bulk-share-btn"
@@ -362,8 +403,9 @@ export function TransactionsTable({
               const debtor = owedBy(e)
               const shortDate = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(`${e.date}T12:00:00`)).replace('.', '')
               const isSelected = selectedExpenseIds.includes(e.id)
+              const isCredit = e.method.startsWith('Crédito')
               return (
-                <tr key={`${e.id}-${e.month}`} className={isSelected ? 'is-selected' : ''}>
+                <tr key={`${e.id}-${e.month}`} className={`${isSelected ? 'is-selected' : ''} ${isCredit && e.paid ? 'is-paid-row' : ''}`.trim()}>
                   <td className="col-select">
                     <input
                       type="checkbox"
@@ -413,11 +455,31 @@ export function TransactionsTable({
                       {txCard ? ` · ${txCard.name}` : ''}
                     </span>
                   </td>
-                  <td className="right value col-value">{money(own)}</td>
+                  <td className="right value col-value">
+                    <div className="tx-value-paid-cell">
+                      <span className={isCredit && e.paid ? 'is-paid-amount' : ''}>{money(own)}</span>
+                      {isCredit && (
+                        <button
+                          type="button"
+                          className={`participant-paid-toggle tx-row-paid-btn ${e.paid ? 'is-paid' : ''}`}
+                          aria-pressed={Boolean(e.paid)}
+                          onClick={() => onToggleExpensePaid(e.id, e.part)}
+                          title={e.paid ? 'Desmarcar como pago' : 'Marcar como pago'}
+                        >
+                          {e.paid ? '✓ Pago' : 'Pagar'}
+                        </button>
+                      )}
+                    </div>
+                  </td>
                   <td className="col-actions">
                     <details className="row-actions">
                       <summary aria-label={`Ações para ${e.description}`} title="Ações">···</summary>
                       <div className={`row-action-menu ${theme === 'dark' ? 'is-dark' : 'is-light'}`}>
+                        {isCredit && (
+                          <button onClick={event => closeActionMenu(event, () => onToggleExpensePaid(e.id, e.part))}>
+                            {e.paid ? 'Desmarcar como pago' : '✓ Marcar como pago'}
+                          </button>
+                        )}
                         {e.installments > 1 && e.part < e.installments && (
                           <button onClick={event => closeActionMenu(event, () => onOpenAdvanceInstallments(e))}>
                             ⚡ Adiantar parcelas ({e.installments - e.part})

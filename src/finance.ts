@@ -8,9 +8,9 @@ export const isManualBillingCard = (card?: Card): boolean => card?.kind === 'sto
 export type Participant = { id: string; name: string }
 export type ParticipantShare = { participantId: string; amount: number; installment?: number; paidInstallments?: number[] }
 export type AllocatedParticipantShare = ParticipantShare & { paid?: boolean }
-export type Expense = { id: string; description: string; amount: number; date: string; category: string; method: Method; cardId?: string; installments: number; firstMonth: string; afterClosing?: boolean; manualFirstMonth?: boolean; recurrenceId?: string; recurrenceMonth?: string; shares?: ParticipantShare[] }
+export type Expense = { id: string; description: string; amount: number; date: string; category: string; method: Method; cardId?: string; installments: number; firstMonth: string; afterClosing?: boolean; manualFirstMonth?: boolean; recurrenceId?: string; recurrenceMonth?: string; shares?: ParticipantShare[]; paidInstallments?: number[] }
 export type Recurrence = { id: string; description: string; amount: number; category: string; method: Method; cardId?: string; day: number; active: boolean; generatedMonths: string[]; skippedMonths: string[] }
-export type Occurrence = Expense & { part: number; month: string; value: number; allocatedShares: AllocatedParticipantShare[] }
+export type Occurrence = Expense & { part: number; month: string; value: number; paid?: boolean; allocatedShares: AllocatedParticipantShare[] }
 export type InstallmentReliefItem = {
   id: string
   description: string
@@ -208,6 +208,7 @@ export const buildOccurrences = (expenses: Expense[]): Occurrence[] => expenses.
     part: i + 1,
     month: shiftMonth(expense.firstMonth, i),
     value: value / 100,
+    ...(expense.paidInstallments?.includes(i + 1) ? { paid: true } : {}),
     allocatedShares: allocations
       .map(share => ({
         participantId: share.participantId,
@@ -367,6 +368,7 @@ export const validateData = (value: unknown): value is Data => {
     if (item.recurrenceId !== undefined && !isText(item.recurrenceId)) return false
     if (item.recurrenceMonth !== undefined && !isText(item.recurrenceMonth)) return false
     if (item.shares !== undefined && (!Array.isArray(item.shares) || !item.shares.every(share => isRecord(share) && isText(share.participantId) && isFiniteNumber(share.amount) && share.amount >= 0 && (share.installment === undefined || (Number.isInteger(share.installment) && Number(share.installment) >= 1 && Number(share.installment) <= 60)) && (share.paidInstallments === undefined || (Array.isArray(share.paidInstallments) && share.paidInstallments.every(p => Number.isInteger(p) && Number(p) >= 1 && Number(p) <= 60)))))) return false
+    if (item.paidInstallments !== undefined && (!Array.isArray(item.paidInstallments) || !item.paidInstallments.every(p => Number.isInteger(p) && Number(p) >= 1 && Number(p) <= 60))) return false
     return true
   })
 }

@@ -198,6 +198,7 @@ function App() {
   const [categoryFilter, setCategoryFilter] = useState('Todas as categorias')
   const [methodFilter, setMethodFilter] = useState('Todos os pagamentos')
   const [cardFilter, setCardFilter] = useState('Todos os cartões')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'unpaid'>('all')
   const [sortOrder, setSortOrder] = useState<SortOrder>('date-desc')
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [isStandalone, setIsStandalone] = useState(
@@ -718,6 +719,8 @@ function App() {
         const resolvedCardId = e.method.startsWith('Crédito') ? e.cardId || data.cards[0]?.id || '' : ''
         if (resolvedCardId !== cardFilter) return false
       }
+      if (statusFilter === 'paid' && e.method.startsWith('Crédito') && !e.paid) return false
+      if (statusFilter === 'unpaid' && (!e.method.startsWith('Crédito') || e.paid)) return false
       return true
     })
     return [...matching].sort((a, b) => {
@@ -727,14 +730,15 @@ function App() {
       if (sortOrder === 'value-asc') return occurrencePersonalValue(a) - occurrencePersonalValue(b) || b.date.localeCompare(a.date)
       return a.description.localeCompare(b.description, 'pt-BR')
     })
-  }, [view, searchAllMonths, occurrences, current, query, categoryFilter, methodFilter, cardFilter, sortOrder, data.cards])
+  }, [view, searchAllMonths, occurrences, current, query, categoryFilter, methodFilter, cardFilter, statusFilter, sortOrder, data.cards])
 
   const hasActiveFilters =
     (view === 'Lançamentos' && searchAllMonths) ||
     Boolean(query.trim()) ||
     categoryFilter !== 'Todas as categorias' ||
     methodFilter !== 'Todos os pagamentos' ||
-    cardFilter !== 'Todos os cartões'
+    cardFilter !== 'Todos os cartões' ||
+    statusFilter !== 'all'
 
   const clearAllFilters = () => {
     setQuery('')
@@ -742,6 +746,7 @@ function App() {
     setCategoryFilter('Todas as categorias')
     setMethodFilter('Todos os pagamentos')
     setCardFilter('Todos os cartões')
+    setStatusFilter('all')
     setSortOrder('date-desc')
   }
 
@@ -803,17 +808,26 @@ function App() {
     .filter(x => x.current > 0 || x.paidCurrent > 0 || x.future > 0)
   const nextMonths = Array.from({ length: 5 }, (_, i) => shiftMonthKey(month, i))
   const nextMonthKey = shiftMonthKey(month, 1)
+  const hasCreditInMonth = currentExpenses.some(e => e.method.startsWith('Crédito'))
+  const paidPersonalTotal = Math.min(
+    total,
+    Math.round(currentExpenses.filter(e => !e.method.startsWith('Crédito') || e.paid).reduce((sum, e) => sum + personalValue(e), 0) * 100) / 100,
+  )
+  const unpaidPersonalTotal = hasCreditInMonth ? Math.max(0, Math.round((total - paidPersonalTotal) * 100) / 100) : 0
   const cardSummaries = data.cards.map(card => {
     const cardOccurrences = currentExpenses.filter(e => e.method.startsWith('Crédito') && (e.cardId || data.cards[0]?.id) === card.id)
     const nextCardOccurrences = occurrences.filter(e => e.month === nextMonthKey && e.method.startsWith('Crédito') && (e.cardId || data.cards[0]?.id) === card.id)
     const invoiceTotal = cardOccurrences.reduce((sum, e) => sum + e.value, 0)
     const rawCardPersonal = cardOccurrences.reduce((sum, e) => sum + personalValue(e), 0)
+    const rawCardPaidPersonal = cardOccurrences.filter(e => e.paid).reduce((sum, e) => sum + personalValue(e), 0)
     const rawCardShared = cardOccurrences.reduce((sum, e) => sum + e.allocatedShares.reduce((s, sh) => s + sh.amount, 0), 0)
     const manualCardOffset = currentReimbursements.filter(r => r.cardId === card.id).reduce((s, r) => s + r.amount, 0)
     const personalPart = Math.max(0, Math.round((rawCardPersonal - manualCardOffset) * 100) / 100)
+    const unpaidPersonalPart = Math.max(0, Math.round((personalPart - rawCardPaidPersonal) * 100) / 100)
+    const allPaid = cardOccurrences.length > 0 && cardOccurrences.every(e => Boolean(e.paid))
     const sharedPart = Math.round((rawCardShared + manualCardOffset) * 100) / 100
     const nextInvoiceTotal = nextCardOccurrences.reduce((sum, e) => sum + e.value, 0)
-    return { card, invoiceTotal, personalPart, sharedPart, count: cardOccurrences.length, nextInvoiceTotal }
+    return { card, invoiceTotal, personalPart, unpaidPersonalPart, allPaid, sharedPart, count: cardOccurrences.length, nextInvoiceTotal }
   })
   const openCardTransactions = (cardId: string) => {
     setQuery('')
@@ -1950,6 +1964,74 @@ function App() {
     save({ ...data, expenses: updatedExpenses })
   }
 
+  const toggleExpensePaid = (expenseId: string, part: number) => {
+    let nextStatus = false
+    const updatedExpenses = data.expenses.map(exp => {
+      if (exp.id !== expenseId) return exp
+      const currentPaid = exp.paidInstallments || []
+      const isAlreadyPaid = currentPaid.includes(part)
+      nextStatus = !isAlreadyPaid
+      const nextPaid = isAlreadyPaid ? currentPaid.filter(p => p !== part) : [...currentPaid, part].sort((a, b) => a - b)
+      const rest = { ...exp }
+      delete rest.paidInstallments
+      return nextPaid.length > 0 ? { ...rest, paidInstallments: nextPaid } : rest
+    })
+    if (save({ ...data, expenses: updatedExpenses })) {
+      showToast(nextStatus ? 'Lançamento marcado como pago!' : 'Lançamento marcado como pendente.')
+    }
+  }
+
+  const setOccurrencesPaid = (targets: { id: string; part: number }[], markPaid: boolean, toastMsg?: string) => {
+    if (targets.length === 0) return false
+    const map = new Map<string, number[]>()
+    for (const t of targets) {
+      const list = map.get(t.id) || []
+      list.push(t.part)
+      map.set(t.id, list)
+    }
+    const updatedExpenses = data.expenses.map(exp => {
+      const parts = map.get(exp.id)
+      if (!parts) return exp
+      const nextSet = new Set(exp.paidInstallments || [])
+      for (const p of parts) {
+        if (markPaid) nextSet.add(p)
+        else nextSet.delete(p)
+      }
+      const nextPaid = Array.from(nextSet).sort((a, b) => a - b)
+      const rest = { ...exp }
+      delete rest.paidInstallments
+      return nextPaid.length > 0 ? { ...rest, paidInstallments: nextPaid } : rest
+    })
+    const ok = save({ ...data, expenses: updatedExpenses })
+    if (ok && toastMsg) showToast(toastMsg)
+    return ok
+  }
+
+  const toggleCardPaidInMonth = (cardId: string) => {
+    const cardOccurrences = currentExpenses.filter(e => e.method.startsWith('Crédito') && (e.cardId || data.cards[0]?.id) === cardId)
+    if (cardOccurrences.length === 0) return
+    const allPaid = cardOccurrences.every(e => Boolean(e.paid))
+    const cardName = data.cards.find(c => c.id === cardId)?.name || 'Cartão'
+    setOccurrencesPaid(
+      cardOccurrences.map(e => ({ id: e.id, part: e.part })),
+      !allPaid,
+      !allPaid ? `Fatura de ${cardName} marcada como paga!` : `Fatura de ${cardName} reaberta.`,
+    )
+  }
+
+  const markSelectedExpensesPaid = (markPaid: boolean) => {
+    const targets = filtered
+      .filter(e => selectedVisibleIds.includes(e.id) && e.method.startsWith('Crédito'))
+      .map(e => ({ id: e.id, part: e.part }))
+    if (targets.length === 0) {
+      showToast('Apenas lançamentos no crédito podem ser marcados como pagos.')
+      return
+    }
+    if (setOccurrencesPaid(targets, markPaid, markPaid ? `${targets.length} item(ns) no crédito marcado(s) como pago(s)!` : `${targets.length} item(ns) marcado(s) como pendente(s).`)) {
+      setSelectedExpenseIds([])
+    }
+  }
+
   const setAllParticipantSharesPaidInMonth = (participantId: string, markPaid: boolean) => {
     const targetsInMonth = new Map<string, number[]>()
     for (const occ of currentExpenses) {
@@ -2422,6 +2504,7 @@ function App() {
       categoryFilter={categoryFilter}
       methodFilter={methodFilter}
       cardFilter={cardFilter}
+      statusFilter={statusFilter}
       sortOrder={sortOrder}
       selectedExpenseIds={selectedExpenseIds}
       selectedVisibleIds={selectedVisibleIds}
@@ -2432,12 +2515,18 @@ function App() {
       onCategoryFilterChange={setCategoryFilter}
       onMethodFilterChange={setMethodFilter}
       onCardFilterChange={setCardFilter}
+      onStatusFilterChange={setStatusFilter}
       onSortOrderChange={setSortOrder}
       onClearAllFilters={clearAllFilters}
       onToggleSelectAllVisible={toggleSelectAllVisible}
       onToggleSelectExpense={toggleSelectExpense}
       onDeleteSelectedExpenses={deleteSelectedExpenses}
+      onMarkSelectedExpensesPaid={markSelectedExpensesPaid}
       onShareExpenses={openQuickShare}
+      onToggleExpensePaid={toggleExpensePaid}
+      hasCreditInMonth={hasCreditInMonth}
+      paidTotal={paidPersonalTotal}
+      unpaidTotal={unpaidPersonalTotal}
       onDownloadCsv={downloadCsv}
       onDownloadImage={downloadReportImage}
       onEditExpense={editExpense}
@@ -2820,6 +2909,9 @@ function App() {
               theme={theme}
               previousMonth={previousMonth}
               total={total}
+              hasCreditInMonth={hasCreditInMonth}
+              paidPersonalTotal={paidPersonalTotal}
+              unpaidPersonalTotal={unpaidPersonalTotal}
               monthChange={monthChange}
               reimbursementTotal={reimbursementTotal}
               upcomingTotal={upcomingTotal}
@@ -2846,6 +2938,7 @@ function App() {
               onCategoryPanelModeChange={setCategoryPanelMode}
               onHoveredCategoryIdChange={setHoveredCategoryId}
               onOpenCardTransactions={openCardTransactions}
+              onToggleCardPaidInMonth={toggleCardPaidInMonth}
               onOpenCardSettings={() => {
                 setView('Ajustes')
                 openCard()
